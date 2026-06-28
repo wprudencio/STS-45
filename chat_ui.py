@@ -20,6 +20,8 @@ from flask import Flask, Response, request, render_template_string
 from supertonic import TTS
 
 LLAMA_API = "http://127.0.0.1:8080/v1/chat/completions"
+STT_API = "http://localhost:8080"
+
 SYS_PROMPT = (
     "You are a friendly, helpful assistant. Respond in the same language as the user. "
     "Keep answers concise and natural for text-to-speech. "
@@ -41,6 +43,7 @@ config = {
     "steps": 5,
     "speed": 1.15,
     "api_url": LLAMA_API,
+    "stt_api_url": STT_API,
     "model": "default",
 }
 
@@ -199,6 +202,36 @@ def api_chat():
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
+
+
+# --- STT endpoint (proxies to parakeet.cpp server) ---
+@app.route("/api/stt", methods=["POST"])
+def api_stt():
+    if "file" not in request.files:
+        return {"error": "no file"}, 400
+
+    file = request.files["file"]
+    lang = request.form.get("lang", "en")
+    stt_api_url = request.form.get("stt_api", config.get("stt_api_url", STT_API)).strip()
+
+    lang_map = {
+        "en": "en", "pt": "pt", "es": "es", "fr": "fr",
+        "de": "de", "ja": "ja", "ko": "ko",
+    }
+    parakeet_lang = lang_map.get(lang, "en")
+
+    try:
+        url = stt_api_url.rstrip("/") + "/v1/audio/transcriptions"
+        resp = requests.post(
+            url,
+            files={"file": (file.filename or "audio.wav", file.read(), "audio/wav")},
+            data={"language": parakeet_lang, "response_format": "json"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return {"text": resp.json().get("text", "")}
+    except Exception as e:
+        return {"error": str(e)}, 500
 
 
 def wav_to_base64(wav: np.ndarray, sample_rate: int) -> str:
@@ -1065,45 +1098,6 @@ HTML = """<!DOCTYPE html>
     </main>
 
     <aside class="panel-right">
-      <div class="metric-block">
-        <div class="section-label" style="margin-bottom:0">Performance</div>
-        <div class="metric-row">
-          <div class="metric-label">
-            <span class="metric-name">Synth time</span>
-            <span class="metric-value active" id="mSynth">&mdash;</span>
-          </div>
-          <div class="bar-track">
-            <div class="bar-fill hl" id="bSynth" style="width:0%"></div>
-          </div>
-        </div>
-        <div class="metric-row">
-          <div class="metric-label">
-            <span class="metric-name">Audio queue</span>
-            <span class="metric-value" id="mQueue">0</span>
-          </div>
-          <div class="bar-track">
-            <div class="bar-fill" id="bQueue" style="width:0%"></div>
-          </div>
-        </div>
-        <div class="metric-row">
-          <div class="metric-label">
-            <span class="metric-name">Sentences</span>
-            <span class="metric-value" id="mPlayed">0</span>
-          </div>
-          <div class="bar-track">
-            <div class="bar-fill" id="bPlayed" style="width:0%"></div>
-          </div>
-        </div>
-        <div class="metric-row">
-          <div class="metric-label">
-            <span class="metric-name">Characters</span>
-            <span class="metric-value" id="mChars">0</span>
-          </div>
-          <div class="bar-track">
-            <div class="bar-fill" id="bChars" style="width:0%"></div>
-          </div>
-        </div>
-      </div>
 
       <div class="metric-block" style="border-bottom:none; padding-bottom:var(--sp2)">
         <div class="section-label" style="margin-bottom:0">Event Log</div>
@@ -1129,15 +1123,19 @@ HTML = """<!DOCTYPE html>
       </div>
       <div class="modal-body">
         <div>
-          <div class="input-lbl">API URL</div>
+          <div class="input-lbl">LLM API URL</div>
           <input class="field-input" type="text" id="apiUrl" placeholder="http://127.0.0.1:8080/v1/chat/completions">
         </div>
         <div>
-          <div class="input-lbl">API Key</div>
+          <div class="input-lbl">LLM API Key</div>
           <input class="field-input" type="password" id="apiKey" placeholder="(leave empty for local)">
-          <div style="font-family:var(--mono); font-size:10px; color:var(--light); margin-top:5px; letter-spacing:0.04em;">
-            // Settings are stored in localStorage.
-          </div>
+        </div>
+        <div>
+          <div class="input-lbl">STT API URL (parakeet.cpp)</div>
+          <input class="field-input" type="text" id="sttApiUrl" placeholder="http://localhost:8080">
+        </div>
+        <div style="font-family:var(--mono); font-size:10px; color:var(--light); margin-top:5px; letter-spacing:0.04em;">
+          // Settings are stored in localStorage.
         </div>
       </div>
       <div class="modal-footer">
@@ -1158,7 +1156,8 @@ HTML = """<!DOCTYPE html>
     let charsSynthesized = 0;
     let lastSynthMs = 0;
 
-    const DEFAULT_API_URL = 'http://127.0.0.1:8080/v1/chat/completions';
+    const DEFAULT_API_URL = '{{ default_api_url }}';
+    const DEFAULT_STT_API_URL = '{{ default_stt_api_url }}';
 
     document.querySelectorAll('input[type=range]').forEach(el => {
       const min = +el.min, max = +el.max, val = +el.value;
@@ -1190,16 +1189,20 @@ HTML = """<!DOCTYPE html>
     function loadSettings() {
       const url = localStorage.getItem('supertonic_api_url') || DEFAULT_API_URL;
       const key = localStorage.getItem('supertonic_api_key') || '';
+      const stt = localStorage.getItem('supertonic_stt_api_url') || DEFAULT_STT_API_URL;
       document.getElementById('apiUrl').value = url;
       document.getElementById('apiKey').value = key;
+      document.getElementById('sttApiUrl').value = stt;
     }
     window.saveConnection = function() {
       const url = document.getElementById('apiUrl').value.trim();
       const key = document.getElementById('apiKey').value.trim();
+      const stt = document.getElementById('sttApiUrl').value.trim();
       localStorage.setItem('supertonic_api_url', url);
       localStorage.setItem('supertonic_api_key', key);
+      localStorage.setItem('supertonic_stt_api_url', stt);
       closeModal();
-      log('LLM connection updated.', 'ok');
+      log('Connection settings updated.', 'ok');
     };
     window.openModal = function() {
       document.getElementById('settingsModal').classList.remove('hidden');
@@ -1234,18 +1237,6 @@ HTML = """<!DOCTYPE html>
       const dot = document.getElementById('statusDot');
       dot.className = 'status-dot' + (state === 'active' ? ' active' : state === 'rec' ? ' rec' : '');
     }
-
-    function updateMetrics() {
-      document.getElementById('mSynth').textContent = lastSynthMs ? lastSynthMs + 'ms' : '\\u2014';
-      document.getElementById('mQueue').textContent = audioQueue.length;
-      document.getElementById('mPlayed').textContent = sentencesPlayed;
-      document.getElementById('mChars').textContent = charsSynthesized;
-      document.getElementById('bSynth').style.width = Math.min(100, (lastSynthMs / 2000) * 100) + '%';
-      document.getElementById('bQueue').style.width = Math.min(100, (audioQueue.length / 10) * 100) + '%';
-      document.getElementById('bPlayed').style.width = Math.min(100, (sentencesPlayed / 30) * 100) + '%';
-      document.getElementById('bChars').style.width = Math.min(100, (charsSynthesized / 2000) * 100) + '%';
-    }
-    setInterval(updateMetrics, 500);
 
     function appendMessage(role, content) {
       const container = document.getElementById('messages');
@@ -1439,88 +1430,94 @@ HTML = """<!DOCTYPE html>
       log('Conversation cleared.', 'ok');
     };
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognition = null;
+    // STT via parakeet.cpp (local, on-device)
     let pttHeld = false;
     let spaceHeld = false;
     let sttPrefix = '';
+    let mediaStream = null;
+    let audioContext = null;
+    let scriptProcessor = null;
+    let sttChunks = [];
 
-    if (SpeechRecognition) {
-      recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      recognition.onresult = (event) => {
-        const join = (prev, next) => {
-          if (!prev) return next;
-          if (!next) return prev;
-          const a = /\\s$/.test(prev);
-          const b = /^\\s/.test(next);
-          return prev + (a || b ? '' : ' ') + next;
-        };
-        let text = '';
-        for (let i = 0; i < event.results.length; i++) {
-          text = join(text, event.results[i][0].transcript);
-        }
-        const input = document.getElementById('userInput');
-        input.value = (sttPrefix + text).replace(/^\\s+|\\s+$/g, '');
-        autoResize(input);
-        onInputChange();
-      };
-      recognition.onend = () => {
-        document.getElementById('pttBtn').classList.remove('recording');
-        if (pttHeld) {
-          sttPrefix = document.getElementById('userInput').value;
-          if (sttPrefix && !sttPrefix.endsWith(' ')) sttPrefix += ' ';
-          try { recognition.start(); return; } catch(e) {}
-        }
-        sttPrefix = '';
-      };
-      recognition.onerror = (e) => {
-        if (e.error === 'no-speech' && pttHeld) {
-          sttPrefix = document.getElementById('userInput').value;
-          if (sttPrefix && !sttPrefix.endsWith(' ')) sttPrefix += ' ';
-          try { recognition.start(); return; } catch(err) {}
-        }
-        document.getElementById('pttBtn').classList.remove('recording');
-        pttHeld = false;
-        sttPrefix = '';
-        log('Mic error: ' + e.error, 'warn');
-      };
-    } else {
-      document.getElementById('pttBtn').style.display = 'none';
-      log('Speech API not supported in this browser.', 'warn');
+    function encodeWAV(samples, sampleRate) {
+      const buf = new ArrayBuffer(44 + samples.length * 2);
+      const v = new DataView(buf);
+      const w = (s, o) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+      w('RIFF', 0); v.setUint32(4, 36 + samples.length * 2, true); w('WAVE', 8);
+      w('fmt ', 12); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      w('data', 36); v.setUint32(40, samples.length * 2, true);
+      for (let i = 0; i < samples.length; i++) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+      return new Blob([buf], { type: 'audio/wav' });
     }
 
-    function startPTT() {
-      if (!recognition || isBusy) return;
-      pttHeld = true;
+    async function startPTT() {
+      if (isBusy) return;
       const current = document.getElementById('userInput').value;
       sttPrefix = current ? (current.endsWith(' ') ? current : current + ' ') : '';
       try {
-        const lang = document.getElementById('lang').value;
-        recognition.lang = lang === 'pt' ? 'pt-BR' :
-                          lang === 'es' ? 'es-ES' :
-                          lang === 'fr' ? 'fr-FR' :
-                          lang === 'de' ? 'de-DE' :
-                          lang === 'ja' ? 'ja-JP' :
-                          lang === 'ko' ? 'ko-KR' : 'en-US';
-        recognition.start();
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+        });
+        audioContext = new AudioContext({ sampleRate: 16000 });
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+        sttChunks = [];
+        scriptProcessor.onaudioprocess = (e) => {
+          sttChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        };
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(audioContext.destination);
+        pttHeld = true;
         document.getElementById('pttBtn').classList.add('recording');
-        setStatus('Listening', 'rec');
-        log('Listening...', 'hl');
-      } catch(e) {
-        pttHeld = false;
-        sttPrefix = '';
+        setStatus('Recording', 'rec');
+        log('Recording via parakeet.cpp STT...', 'hl');
+      } catch (e) {
+        log('Mic error: ' + e.message, 'warn');
       }
     }
-    function stopPTT() {
+
+    async function stopPTT() {
       pttHeld = false;
-      if (recognition) {
-        try { recognition.stop(); } catch(e) {}
+      if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor = null; }
+      if (audioContext) { await audioContext.close(); audioContext = null; }
+      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+      document.getElementById('pttBtn').classList.remove('recording');
+      if (sttChunks.length === 0) {
+        setStatus('Ready', '');
+        return;
       }
-      setStatus(isBusy ? 'Streaming' : 'Ready', isBusy ? 'active' : '');
+      setStatus('Transcribing', 'active');
+      const total = sttChunks.reduce((s, c) => s + c.length, 0);
+      const samples = new Float32Array(total);
+      let offset = 0;
+      for (const c of sttChunks) { samples.set(c, offset); offset += c.length; }
+      const wav = encodeWAV(samples, 16000);
+      sttChunks = [];
+      try {
+        const formData = new FormData();
+        formData.append('file', wav, 'recording.wav');
+        formData.append('lang', document.getElementById('lang').value);
+        formData.append('stt_api', document.getElementById('sttApiUrl').value.trim());
+        const resp = await fetch('/api/stt', { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (data.text) {
+          const input = document.getElementById('userInput');
+          input.value = (sttPrefix + data.text).replace(/^\\s+|\\s+$/g, '');
+          autoResize(input);
+          onInputChange();
+          log('STT: ' + data.text.substring(0, 50) + (data.text.length > 50 ? '...' : ''), 'ok');
+        } else if (data.error) {
+          log('STT error: ' + data.error, 'warn');
+        }
+      } catch (e) {
+        log('STT error: ' + e.message, 'warn');
+      }
+      sttPrefix = '';
+      setStatus('Ready', '');
     }
 
     const pttBtn = document.getElementById('pttBtn');
@@ -1547,7 +1544,7 @@ HTML = """<!DOCTYPE html>
     });
 
     setStatus('Ready', '');
-    log('Supertonic voice chat ready.', 'ok');
+    log('Supertonic voice chat ready \u2014 STT via parakeet.cpp.', 'ok');
     document.getElementById('userInput').focus();
   </script>
 </body>
@@ -1557,7 +1554,11 @@ HTML = """<!DOCTYPE html>
 
 @app.route("/")
 def index():
-    return render_template_string(HTML)
+    return render_template_string(
+        HTML,
+        default_api_url=config["api_url"],
+        default_stt_api_url=config["stt_api_url"],
+    )
 
 
 def main():
@@ -1567,6 +1568,7 @@ def main():
     parser.add_argument("--host", default="127.0.0.1", help="Host")
     parser.add_argument("--port", type=int, default=7777, help="Port")
     parser.add_argument("--api", default=LLAMA_API, help="LLM API URL")
+    parser.add_argument("--stt-api", default=STT_API, help="Parakeet STT server URL")
     parser.add_argument("--model", default="default", help="Model name")
     parser.add_argument("--voice", default="M1", help="Voice")
     parser.add_argument("--lang", default="en", help="Language")
@@ -1580,6 +1582,7 @@ def main():
         "steps": args.steps,
         "speed": args.speed,
         "api_url": args.api,
+        "stt_api_url": args.stt_api,
         "model": args.model,
     })
 
@@ -1592,6 +1595,7 @@ def main():
 ║   🎤 Supertonic Voice Chat              ║
 ║   Open: http://{args.host}:{args.port}          ║
 ║   LLM:  {args.api}        ║
+║   STT:  {args.stt_api}           ║
 ║   Voice: {args.voice}  |  Lang: {args.lang}      ║
 ║   Steps: {args.steps}  |  Speed: {args.speed}          ║
 ╚══════════════════════════════════════════╝
