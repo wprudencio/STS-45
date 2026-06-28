@@ -1,0 +1,36 @@
+# Git
+.git
+.gitattributes
+.gitignore
+
+# Assets (downloaded at runtime, not in image)
+assets/
+
+# Platform dirs (not needed for server)
+cpp/
+csharp/
+flutter/
+go/
+java/
+ios/
+nodejs/
+rust/
+swift/
+web/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.uv/
+uv.lock
+pyproject.toml
+
+# Docs/Images
+img/
+*.md
+LICENSE
+test_all.sh
+
+# Old CLI
+chat.py

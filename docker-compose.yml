@@ -1,0 +1,17 @@
+services:
+  chat:
+    build: .
+    container_name: supertonic-chat
+    ports:
+      - "7777:7777"
+    volumes:
+      # Persist HuggingFace model cache (avoids re-downloading ~260MB on rebuild)
+      - hf_cache:/root/.cache/huggingface
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    # Optional: pass custom defaults via env
+    # command: python3 chat_ui.py --host 0.0.0.0 --port 7777 --voice F2 --lang en
+
+volumes:
+  hf_cache:
