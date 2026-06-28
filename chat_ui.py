@@ -95,9 +95,12 @@ def api_chat():
     for key in ("lang", "voice", "steps", "speed"):
         if key in data:
             config[key] = data[key]
-    # Aceita API URL e key do frontend (sobrescreve defaults locais)
+    # Aceita API URL, key, e system prompt do frontend
     api_url = data.get("api_url", config["api_url"]).strip()
     api_key = data.get("api_key", "").strip()
+    sys_prompt = data.get("sys_prompt", "").strip()
+    if sys_prompt:
+        messages[0] = {"role": "system", "content": sys_prompt}
     if not api_url:
         api_url = config["api_url"]
     if "voice" in data:
@@ -1333,6 +1336,7 @@ HTML = """<!DOCTYPE html>
             speed: parseFloat(document.getElementById('speed').value),
             api_url: document.getElementById('apiUrl').value.trim(),
             api_key: document.getElementById('apiKey').value.trim(),
+            sys_prompt: document.getElementById('sysPrompt').value,
           })
         });
       } catch (err) {
