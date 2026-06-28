@@ -10,18 +10,13 @@ Browser mic ──→ parakeet.cpp ──→ llama.cpp ──→ Supertonic TTS 
 ## Quick Start
 
 ```bash
-# 1. Download STT model (one-time)
-mkdir -p models
-curl -L -o models/tdt_ctc-110m-q5_k.gguf \
-  https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt_ctc-110m-q5_k.gguf
-
-# 2. Start llama.cpp on host
+# 1. Start llama.cpp on host
 llama-server -m your-model.gguf --port 8080
 
-# 3. Start everything else
+# 2. Start everything (STT model auto-downloads on first run)
 docker compose up -d
 
-# 4. Open http://localhost:7777
+# 3. Open http://localhost:7777
 ```
 
 ## Manual
