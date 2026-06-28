@@ -20,16 +20,9 @@ services:
     ports:
       - "8081:8080"
     volumes:
-      - stt_models:/models
-    command: >-
-      sh -c "
-        [ -f /models/tdt_ctc-110m-q5_k.gguf ] ||
-        wget -q --show-progress -O /models/tdt_ctc-110m-q5_k.gguf
-        https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt_ctc-110m-q5_k.gguf;
-        exec parakeet-server --model /models/tdt_ctc-110m-q5_k.gguf
-      "
+      - ./models:/models:ro
+    command: --model /models/tdt_ctc-110m-q5_k.gguf
     restart: unless-stopped
 
 volumes:
   hf_cache:
-  stt_models:
