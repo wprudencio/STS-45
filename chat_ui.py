@@ -207,6 +207,39 @@ def api_chat():
     return Response(generate(), mimetype="text/event-stream")
 
 
+# --- Load conversation history ---
+@app.route("/api/chat/load", methods=["POST"])
+def api_chat_load():
+    global messages
+    data = request.get_json()
+    msgs = data.get("messages", [])
+    sys_prompt = data.get("sys_prompt", "").strip()
+    if sys_prompt:
+        messages = [{"role": "system", "content": sys_prompt}] + msgs
+    else:
+        messages = [{"role": "system", "content": SYS_PROMPT}] + msgs
+    return {"status": "ok", "count": len(messages)}
+
+# --- Standalone TTS endpoint (for play-message feature) ---
+@app.route("/api/tts", methods=["POST"])
+def api_tts():
+    data = request.get_json()
+    text = (data.get("text", "")).strip()
+    if not text:
+        return {"error": "empty text"}, 400
+    lang = data.get("lang", config["lang"])
+    voice = data.get("voice", config["voice"])
+    steps = int(data.get("steps", config["steps"]))
+    speed = float(data.get("speed", config["speed"]))
+    try:
+        vs = tts.get_voice_style(voice_name=voice)
+        with tts_lock:
+            wav, dur = tts.synthesize(text=text, lang=lang, voice_style=vs, total_steps=steps, speed=speed)
+        b64 = wav_to_base64(wav, tts.sample_rate)
+        return {"audio": b64, "dur_ms": dur}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
 # --- STT endpoint (proxies to parakeet.cpp server) ---
 @app.route("/api/stt", methods=["POST"])
 def api_stt():
@@ -285,6 +318,55 @@ HTML = """<!DOCTYPE html>
       --dur: 200ms;
       --ease: cubic-bezier(0.25, 0, 0, 1);
     }
+
+    :root.dark {
+      --bg: #1a1a1a;
+      --bg2: #222;
+      --white: #2a2a2a;
+      --charcoal: #e0e0e0;
+      --char2: #ccc;
+      --mid: #999;
+      --light: #777;
+    }
+    .dark .topbar { border-bottom-color: #000; }
+    .dark .panel-left { border-right-color: #2a2a2a; }
+    .dark .panel-center { border-right-color: #2a2a2a; }
+    .dark .panel-section { border-bottom-color: #333; }
+    .dark .conv-item { border-bottom-color: #333; }
+    .dark .conv-item:hover { background: #333; }
+    .dark .chat-header { border-bottom-color: #333; }
+    .dark .input-area { border-top-color: #333; background: #1e1e1e; }
+    .dark .input-hint { color: #555; }
+    .dark .msg-time { color: #555; }
+    .dark .message.user .msg-content { border-color: #444; }
+    .dark .spec-row { border-bottom-color: #333; }
+    .dark .log-stream { border-color: #333; }
+    .dark .log-entry .ts { color: #555; }
+    .dark .model-select, .dark .sys-prompt, .dark .user-input, .dark .field-input { border-color: #444; }
+    .dark .model-select option { background: #2a2a2a; color: #e0e0e0; }
+    .dark .ptt-btn { border-color: #444; }
+    .dark .clear-btn { border-color: #444; }
+    .dark .modal { border-color: #444; }
+    .dark .modal-header { border-color: #444; }
+    .dark .modal-footer { border-color: #444; }
+    .dark ::-webkit-scrollbar-thumb { background: #555; }
+    .dark .messages::-webkit-scrollbar-thumb { background: #555; }
+    .dark .log-stream::-webkit-scrollbar-thumb { background: #555; }
+    .dark .new-chat-btn:hover { background: #3a3a3a; }
+    .dark input[type=range] { background: linear-gradient(to right, var(--charcoal) var(--fill, 0%), #444 var(--fill, 0%)); }
+    .dark hr { border-color: #444 !important; }
+
+    .theme-btn {
+      background: none;
+      border: none;
+      color: var(--light);
+      cursor: pointer;
+      padding: 4px 8px;
+      font-size: 16px;
+      line-height: 1;
+      transition: color var(--dur);
+    }
+    .theme-btn:hover { color: var(--orange); }
 
     html, body { height: 100%; overflow: hidden; }
 
@@ -375,7 +457,7 @@ HTML = """<!DOCTYPE html>
       flex: 1;
       min-height: 0;
       display: grid;
-      grid-template-columns: 320px 1fr 260px;
+      grid-template-columns: 320px 1fr;
       overflow: hidden;
     }
 
@@ -464,6 +546,51 @@ HTML = """<!DOCTYPE html>
       color: var(--char2);
       font-weight: 500;
     }
+
+    .conv-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--sp1) 0;
+      scrollbar-width: thin;
+    }
+    .conv-item {
+      padding: 10px var(--sp3);
+      cursor: pointer;
+      border-bottom: 1px solid #ebebeb;
+      transition: background var(--dur);
+    }
+    .conv-item:hover { background: #f5f5f5; }
+    .conv-item.active {
+      background: var(--orange);
+      color: var(--white);
+    }
+    .conv-item.active .conv-meta { color: rgba(255,255,255,0.7); }
+    .conv-title {
+      font-family: var(--mono);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    .conv-meta {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--light);
+    }
+    .new-chat-btn {
+      width: 100%;
+      background: var(--charcoal);
+      color: var(--white);
+      border: none;
+      padding: 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      transition: background var(--dur);
+    }
+    .new-chat-btn:hover { background: #333; }
 
     input[type=range] {
       -webkit-appearance: none;
@@ -660,6 +787,16 @@ HTML = """<!DOCTYPE html>
       letter-spacing: 0.03em;
     }
 
+    .msg-play {
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+      color: var(--light);
+      transition: color var(--dur);
+      margin-left: auto;
+    }
+    .msg-play:hover { color: var(--orange); }
+
     .msg-content {
       font-size: 16px;
       line-height: 1.65;
@@ -803,6 +940,54 @@ HTML = """<!DOCTYPE html>
       overflow-y: auto;
     }
 
+    /* Footer log */
+    .footer-log {
+      flex-shrink: 0;
+      border-top: 1px solid #d8d8d8;
+      background: var(--bg2);
+    }
+    .footer-log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px var(--sp3);
+      cursor: pointer;
+      user-select: none;
+    }
+    .footer-log-header:hover { background: rgba(0,0,0,0.03); }
+    .dark .footer-log-header:hover { background: rgba(255,255,255,0.03); }
+    .footer-log-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--light);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .footer-log-toggle {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--light);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px 6px;
+    }
+    .footer-log-toggle:hover { color: var(--orange); }
+    .footer-log-body {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 200ms ease;
+    }
+    .footer-log-body.open { max-height: 200px; }
+    .footer-log-body .log-stream {
+      border: none;
+      border-top: 1px solid #e4e4e4;
+      max-height: 190px;
+      min-height: 0;
+    }
+    .dark .footer-log-body .log-stream { border-top-color: #333; }
+    .dark .footer-log { border-top-color: #2a2a2a; }
+
     .metric-block {
       padding: var(--sp3);
       border-bottom: 1px solid #e0e0e0;
@@ -865,26 +1050,6 @@ HTML = """<!DOCTYPE html>
     .log-entry.ok { color: #7a9e7e; }
     .log-entry.warn { color: var(--soft); }
     .log-entry.hl { color: var(--orange); }
-
-    /* FOOTER */
-    .footer {
-      height: 48px;
-      flex-shrink: 0;
-      background: var(--deep);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 var(--sp4);
-      border-top: 1px solid #111;
-    }
-    .footer-headline {
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--bg);
-      letter-spacing: -0.01em;
-      line-height: 1.15;
-    }
-    .footer-headline em { font-style: normal; color: var(--orange); }
 
     ::-webkit-scrollbar { width: 3px; height: 3px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -955,13 +1120,11 @@ HTML = """<!DOCTYPE html>
 
     /* Responsive */
     @media (max-width: 1100px) {
-      .shell { grid-template-columns: 280px 1fr 240px; }
+      .shell { grid-template-columns: 280px 1fr; }
     }
     @media (max-width: 900px) {
       .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
-      .panel-left, .panel-right { max-height: 200px; }
-      .panel-left { border-right: none; border-bottom: 1px solid #d8d8d8; }
-      .panel-right { border-left: none; border-top: 1px solid #d8d8d8; }
+      .panel-left { max-height: 200px; border-right: none; border-bottom: 1px solid #d8d8d8; }
       .topbar-right { display: none; }
     }
   </style>
@@ -980,6 +1143,8 @@ HTML = """<!DOCTYPE html>
       <span class="status-text" id="statusText">Ready</span>
     </div>
     <div class="topbar-right">
+      <button class="theme-btn" id="voiceToggleBtn" onclick="toggleVoice()" title="Toggle voice output">&#x1F50A;</button>
+      <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle theme">&#x25CB;</button>
       <span class="live-badge">Voice: <span id="liveVoice">M1</span></span>
       <span class="live-badge">Lang: <span id="liveLang">EN</span></span>
     </div>
@@ -988,70 +1153,19 @@ HTML = """<!DOCTYPE html>
   <div class="shell">
 
     <aside class="panel-left">
-      <div class="panel-section">
-        <div class="section-label">Voice</div>
-        <div class="select-wrap">
-          <select class="model-select" id="voice" onchange="onVoiceChange()">
-            <option value="M1">M1 &middot; Male deep</option>
-            <option value="M2">M2 &middot; Male mid</option>
-            <option value="M3">M3 &middot; Male bright</option>
-            <option value="M4">M4 &middot; Male warm</option>
-            <option value="M5">M5 &middot; Male neutral</option>
-            <option value="F1">F1 &middot; Female deep</option>
-            <option value="F2">F2 &middot; Female mid</option>
-            <option value="F3">F3 &middot; Female bright</option>
-            <option value="F4">F4 &middot; Female warm</option>
-            <option value="F5">F5 &middot; Female neutral</option>
-          </select>
-        </div>
-        <div class="section-label" style="margin-top: var(--sp2)">Language</div>
-        <div class="select-wrap">
-          <select class="model-select" id="lang" onchange="onLangChange()">
-            <option value="en">EN &middot; English</option>
-            <option value="pt">PT &middot; Portuguese</option>
-            <option value="es">ES &middot; Spanish</option>
-            <option value="fr">FR &middot; French</option>
-            <option value="de">DE &middot; German</option>
-            <option value="ja">JP &middot; Japanese</option>
-            <option value="ko">KR &middot; Korean</option>
-          </select>
-        </div>
+      <div class="panel-section" style="padding:0">
+        <button class="new-chat-btn" onclick="newConversation()">+ New Chat</button>
       </div>
-
-      <div class="panel-section">
-        <div class="section-label">TTS Parameters</div>
-        <div class="slider-row">
-          <div class="slider-label">
-            <span class="slider-name">Diffusion Steps</span>
-            <span class="slider-val" id="stepsVal">5</span>
-          </div>
-          <input type="range" id="steps" min="2" max="12" step="1" value="5"
-            oninput="document.getElementById('stepsVal').textContent=this.value; updateSlider(this)">
-        </div>
-        <div class="slider-row">
-          <div class="slider-label">
-            <span class="slider-name">Speed</span>
-            <span class="slider-val" id="speedVal">1.15</span>
-          </div>
-          <input type="range" id="speed" min="0.7" max="2.0" step="0.05" value="1.15"
-            oninput="document.getElementById('speedVal').textContent=parseFloat(this.value).toFixed(2); updateSlider(this)">
-        </div>
-      </div>
-
-      <div class="panel-section">
+      <div class="conv-list" id="conversationList"></div>
+      <div class="panel-section" style="border-top:1px solid #e0e0e0">
         <div class="section-label">System Prompt</div>
-        <textarea class="sys-prompt" id="sysPrompt" rows="4">You are a friendly, helpful assistant. Respond in the same language as the user. Keep answers concise and natural for text-to-speech. Avoid markdown, lists, URLs, or special formatting. Use short to medium sentences. Avoid asterisks and emojis.</textarea>
+        <textarea class="sys-prompt" id="sysPrompt" rows="4"></textarea>
       </div>
-
       <div class="panel-section">
         <div class="section-label" style="display:flex; justify-content:space-between;">
-          <span>LLM Connection</span>
+          <span>Settings</span>
           <span style="cursor:pointer; color:var(--orange); font-size:10px" onclick="openModal()">Configure</span>
         </div>
-      </div>
-
-      <div class="panel-section">
-        <button class="clear-btn" onclick="clearChat()">Clear Conversation</button>
       </div>
     </aside>
 
@@ -1079,7 +1193,7 @@ HTML = """<!DOCTYPE html>
 
       <div class="input-area">
         <div class="input-row">
-          <button class="ptt-btn" id="pttBtn" title="Hold to talk (or hold Space)" aria-label="Push to talk">
+          <button class="ptt-btn" id="pttBtn" title="Click to talk (or double-tap Shift)" aria-label="Push to talk">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
               <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
@@ -1096,35 +1210,78 @@ HTML = """<!DOCTYPE html>
             </svg>
           </button>
         </div>
-        <div class="input-hint">Hold Mic or Space to dictate (appends) &middot; &crarr; Send &middot; Shift+&crarr; New line</div>
+        <div class="input-hint">Double-tap &#x21E7; to dictate (appends) &middot; &crarr; Send &middot; Shift+&crarr; New line</div>
       </div>
     </main>
-
-    <aside class="panel-right">
-
-      <div class="metric-block" style="border-bottom:none; padding-bottom:var(--sp2)">
-        <div class="section-label" style="margin-bottom:0">Event Log</div>
-      </div>
-      <div class="log-wrap">
-        <div class="log-stream" id="logStream"></div>
-      </div>
-    </aside>
   </div>
 
-  <footer class="footer">
-    <div class="footer-headline">
-      Hold to talk, release to send.<br>
-      <em>On-device</em> text-to-speech synthesis.
+  <div class="footer-log" id="footerLog">
+    <div class="footer-log-header" onclick="toggleLog()">
+      <span class="footer-log-label">Event Log</span>
+      <span class="footer-log-toggle" id="logToggle">&#x25B2;</span>
     </div>
-  </footer>
+    <div class="footer-log-body" id="logBody">
+      <div class="log-stream" id="logStream"></div>
+    </div>
+  </div>
 
   <div id="settingsModal" class="modal-overlay hidden">
     <div class="modal">
       <div class="modal-header">
-        <span class="modal-title">LLM Connection</span>
+        <span class="modal-title">Settings</span>
         <span style="cursor:pointer; color:var(--light); font-size:18px; line-height:1" onclick="closeModal()">&times;</span>
       </div>
       <div class="modal-body">
+        <div>
+          <div class="input-lbl">Voice</div>
+          <div class="select-wrap" style="margin-bottom:0">
+            <select class="model-select" id="voice" onchange="onVoiceChange()">
+              <option value="M1">M1 &middot; Male deep</option>
+              <option value="M2">M2 &middot; Male mid</option>
+              <option value="M3">M3 &middot; Male bright</option>
+              <option value="M4">M4 &middot; Male warm</option>
+              <option value="M5">M5 &middot; Male neutral</option>
+              <option value="F1">F1 &middot; Female deep</option>
+              <option value="F2">F2 &middot; Female mid</option>
+              <option value="F3">F3 &middot; Female bright</option>
+              <option value="F4">F4 &middot; Female warm</option>
+              <option value="F5">F5 &middot; Female neutral</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <div class="input-lbl">Language</div>
+          <div class="select-wrap" style="margin-bottom:0">
+            <select class="model-select" id="lang" onchange="onLangChange()">
+              <option value="en">EN &middot; English</option>
+              <option value="pt">PT &middot; Portuguese</option>
+              <option value="es">ES &middot; Spanish</option>
+              <option value="fr">FR &middot; French</option>
+              <option value="de">DE &middot; German</option>
+              <option value="ja">JP &middot; Japanese</option>
+              <option value="ko">KO &middot; Korean</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <div class="slider-row" style="margin-bottom:0">
+            <div class="slider-label">
+              <span class="slider-name">Diffusion Steps</span>
+              <span class="slider-val" id="stepsVal">5</span>
+            </div>
+            <input type="range" id="steps" min="2" max="12" step="1" value="5"
+              oninput="document.getElementById('stepsVal').textContent=this.value; updateSlider(this)">
+          </div>
+          <div class="slider-row" style="margin-bottom:0">
+            <div class="slider-label">
+              <span class="slider-name">Speed</span>
+              <span class="slider-val" id="speedVal">1.15</span>
+            </div>
+            <input type="range" id="speed" min="0.7" max="2.0" step="0.05" value="1.15"
+              oninput="document.getElementById('speedVal').textContent=parseFloat(this.value).toFixed(2); updateSlider(this)">
+          </div>
+        </div>
+        <hr style="border:none; border-top:1px solid #d4d4d4; margin:0">
         <div>
           <div class="input-lbl">LLM API URL</div>
           <input class="field-input" type="text" id="apiUrl" placeholder="http://127.0.0.1:8080/v1/chat/completions">
@@ -1152,6 +1309,7 @@ HTML = """<!DOCTYPE html>
     const sessionStart = Date.now();
     let audioQueue = [];
     let isPlaying = false;
+    let voiceMuted = false;
     let isBusy = false;
     let currentAssistantEl = null;
     let currentReasoningEl = null;
@@ -1193,19 +1351,40 @@ HTML = """<!DOCTYPE html>
       const url = localStorage.getItem('supertonic_api_url') || DEFAULT_API_URL;
       const key = localStorage.getItem('supertonic_api_key') || '';
       const stt = localStorage.getItem('supertonic_stt_api_url') || DEFAULT_STT_API_URL;
+      const voice = localStorage.getItem('supertonic_voice') || 'M1';
+      const lang = localStorage.getItem('supertonic_lang') || 'en';
+      const steps = parseInt(localStorage.getItem('supertonic_steps') || '5', 10);
+      const speed = parseFloat(localStorage.getItem('supertonic_speed') || '1.15');
       document.getElementById('apiUrl').value = url;
       document.getElementById('apiKey').value = key;
       document.getElementById('sttApiUrl').value = stt;
+      document.getElementById('voice').value = voice;
+      document.getElementById('lang').value = lang;
+      document.getElementById('steps').value = steps;
+      document.getElementById('stepsVal').textContent = steps;
+      updateSlider(document.getElementById('steps'));
+      document.getElementById('speed').value = speed;
+      document.getElementById('speedVal').textContent = speed.toFixed(2);
+      updateSlider(document.getElementById('speed'));
+      syncTopbar();
     }
     window.saveConnection = function() {
       const url = document.getElementById('apiUrl').value.trim();
       const key = document.getElementById('apiKey').value.trim();
       const stt = document.getElementById('sttApiUrl').value.trim();
+      const voice = document.getElementById('voice').value;
+      const lang = document.getElementById('lang').value;
+      const steps = document.getElementById('steps').value;
+      const speed = document.getElementById('speed').value;
       localStorage.setItem('supertonic_api_url', url);
       localStorage.setItem('supertonic_api_key', key);
       localStorage.setItem('supertonic_stt_api_url', stt);
+      localStorage.setItem('supertonic_voice', voice);
+      localStorage.setItem('supertonic_lang', lang);
+      localStorage.setItem('supertonic_steps', steps);
+      localStorage.setItem('supertonic_speed', speed);
       closeModal();
-      log('Connection settings updated.', 'ok');
+      log('Settings saved.', 'ok');
     };
     window.openModal = function() {
       document.getElementById('settingsModal').classList.remove('hidden');
@@ -1221,6 +1400,214 @@ HTML = """<!DOCTYPE html>
     });
     loadSettings();
 
+    // --- IndexedDB conversation history ---
+    let db = null;
+    let currentConvId = null;
+    let currentConvMessages = [];
+    let currentReasoningText = '';
+
+    function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function formatTimeAgo(iso) {
+      const diff = Date.now() - new Date(iso).getTime();
+      const min = Math.floor(diff / 60000);
+      if (min < 1) return 'Just now';
+      if (min < 60) return min + 'm ago';
+      const h = Math.floor(min / 60);
+      if (h < 24) return h + 'h ago';
+      return new Date(iso).toLocaleDateString();
+    }
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open('supertonic_history', 1);
+        req.onupgradeneeded = e => {
+          const db2 = e.target.result;
+          if (!db2.objectStoreNames.contains('conversations')) {
+            const store = db2.createObjectStore('conversations', { keyPath: 'id', autoIncrement: true });
+            store.createIndex('updatedAt', 'updatedAt', { unique: false });
+          }
+        };
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror = e => reject(e.target.error);
+      });
+    }
+
+    function dbAdd(conv) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('conversations', 'readwrite');
+        const store = tx.objectStore('conversations');
+        const req = store.add(conv);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = e => reject(e.target.error);
+      });
+    }
+
+    function dbUpdate(conv) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('conversations', 'readwrite');
+        const store = tx.objectStore('conversations');
+        const req = store.put(conv);
+        req.onsuccess = () => resolve();
+        req.onerror = e => reject(e.target.error);
+      });
+    }
+
+    function dbGet(id) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('conversations', 'readonly');
+        const store = tx.objectStore('conversations');
+        const req = store.get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = e => reject(e.target.error);
+      });
+    }
+
+    function dbGetAll() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('conversations', 'readonly');
+        const store = tx.objectStore('conversations');
+        const index = store.index('updatedAt');
+        const req = index.openCursor(null, 'prev');
+        const results = [];
+        req.onsuccess = e => {
+          const cursor = e.target.result;
+          if (cursor) { results.push(cursor.value); cursor.continue(); }
+          else resolve(results);
+        };
+        req.onerror = e => reject(e.target.error);
+      });
+    }
+
+    async function saveCurrentConv() {
+      if (!currentConvId || currentConvMessages.length === 0) return;
+      const conv = await dbGet(currentConvId);
+      if (!conv) return;
+      conv.messages = currentConvMessages;
+      conv.updatedAt = new Date().toISOString();
+      if (conv.title === 'New Chat' && currentConvMessages.length > 0) {
+        conv.title = currentConvMessages[0].content.substring(0, 50);
+      }
+      conv.sysPrompt = document.getElementById('sysPrompt').value;
+      await dbUpdate(conv);
+    }
+
+    async function loadConversation(conv) {
+      if (isBusy) return;
+      await saveCurrentConv();
+      clearChatUI();
+      currentConvId = conv.id;
+      currentConvMessages = conv.messages || [];
+      localStorage.setItem('activeConvId', currentConvId);
+      if (conv.sysPrompt) document.getElementById('sysPrompt').value = conv.sysPrompt;
+      if (currentConvMessages.length > 0) {
+        document.getElementById('initOverlay').classList.add('hidden');
+        document.getElementById('messages').classList.remove('hidden');
+        currentConvMessages.forEach(m => appendMessage(m.role, m.content));
+      }
+      try {
+        await fetch('/api/chat/load', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            messages: conv.messages ? conv.messages.filter(m => m.role !== 'reasoning') : [],
+            sys_prompt: conv.sysPrompt || ''
+          })
+        });
+      } catch(e) {}
+      await renderConvList();
+    }
+
+    function clearChatUI() {
+      document.getElementById('messages').innerHTML = '';
+      document.getElementById('messages').classList.add('hidden');
+      document.getElementById('initOverlay').classList.remove('hidden');
+      sentencesPlayed = 0; charsSynthesized = 0; lastSynthMs = 0;
+      currentAssistantEl = null; currentReasoningEl = null;
+      currentReasoningText = '';
+    }
+
+    function dbDelete(id) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('conversations', 'readwrite');
+        const store = tx.objectStore('conversations');
+        const req = store.delete(id);
+        req.onsuccess = () => resolve();
+        req.onerror = e => reject(e.target.error);
+      });
+    }
+
+    async function renderConvList() {
+      const container = document.getElementById('conversationList');
+      if (!container) return;
+      const list = await dbGetAll();
+      container.innerHTML = list.map(c =>
+        '<div class="conv-item' + (c.id === currentConvId ? ' active' : '') + '" data-id="' + c.id + '">' +
+          '<div style="display:flex; justify-content:space-between; align-items:center">' +
+            '<div style="flex:1; min-width:0">' +
+              '<div class="conv-title">' + escapeHtml(c.title) + '</div>' +
+              '<div class="conv-meta">' + formatTimeAgo(c.updatedAt) + '</div>' +
+            '</div>' +
+            '<span class="conv-del" data-id="' + c.id + '" title="Delete conversation">&#x1F5D1;</span>' +
+          '</div>' +
+        '</div>'
+      ).join('');
+      container.querySelectorAll('.conv-item').forEach(el => {
+        el.addEventListener('click', async e => {
+          if (e.target.classList.contains('conv-del')) return;
+          const id = parseInt(el.dataset.id);
+          const conv = await dbGet(id);
+          if (conv) loadConversation(conv);
+        });
+      });
+      container.querySelectorAll('.conv-del').forEach(el => {
+        el.addEventListener('click', async e => {
+          e.stopPropagation();
+          const id = parseInt(el.dataset.id);
+          await dbDelete(id);
+          if (currentConvId === id) {
+            clearChatUI();
+            currentConvMessages = [];
+            const convs = await dbGetAll();
+            if (convs.length > 0) {
+              await loadConversation(convs[0]);
+            } else {
+              await newConversation();
+            }
+          } else {
+            await renderConvList();
+          }
+        });
+      });
+    }
+
+    window.newConversation = async function() {
+      if (isBusy) return;
+      await saveCurrentConv();
+      clearChatUI();
+      const now = new Date().toISOString();
+      const id = await dbAdd({
+        title: 'New Chat',
+        sysPrompt: document.getElementById('sysPrompt').value,
+        messages: [],
+        createdAt: now,
+        updatedAt: now
+      });
+      currentConvId = id;
+      currentConvMessages = [];
+      localStorage.setItem('activeConvId', id);
+      await renderConvList();
+    };
+
+    async function initConversationHistory() {
+      db = await openDB();
+      const savedId = parseInt(localStorage.getItem('activeConvId') || '0');
+      if (savedId) {
+        const conv = await dbGet(savedId);
+        if (conv) { await loadConversation(conv); return; }
+      }
+      await newConversation();
+    }
+
     function syncTopbar() {
       document.getElementById('liveVoice').textContent = document.getElementById('voice').value;
       document.getElementById('liveLang').textContent = document.getElementById('lang').value.toUpperCase();
@@ -1234,6 +1621,31 @@ HTML = """<!DOCTYPE html>
       log('Language set to ' + document.getElementById('lang').value.toUpperCase());
     };
     syncTopbar();
+
+    // Voice mute toggle
+    window.toggleVoice = function() {
+      voiceMuted = !voiceMuted;
+      document.getElementById('voiceToggleBtn').innerHTML = voiceMuted ? '&#x1F507;' : '&#x1F50A;';
+      document.getElementById('voiceToggleBtn').style.opacity = voiceMuted ? '0.4' : '1';
+      localStorage.setItem('supertonic_voice_muted', voiceMuted ? '1' : '');
+      log('Voice output ' + (voiceMuted ? 'muted' : 'unmuted'), 'hl');
+    };
+    if (localStorage.getItem('supertonic_voice_muted') === '1') {
+      voiceMuted = true;
+      document.getElementById('voiceToggleBtn').innerHTML = '&#x1F507;';
+      document.getElementById('voiceToggleBtn').style.opacity = '0.4';
+    }
+
+    // Theme toggle
+    window.toggleTheme = function() {
+      const isDark = document.documentElement.classList.toggle('dark');
+      document.getElementById('themeBtn').innerHTML = isDark ? '&#x25CF;' : '&#x25CB;';
+      localStorage.setItem('supertonic_theme', isDark ? 'dark' : 'light');
+    };
+    if (localStorage.getItem('supertonic_theme') === 'dark') {
+      document.documentElement.classList.add('dark');
+      document.getElementById('themeBtn').innerHTML = '&#x25CF;';
+    }
 
     function setStatus(text, state) {
       document.getElementById('statusText').textContent = text;
@@ -1249,12 +1661,48 @@ HTML = """<!DOCTYPE html>
       let avatar = 'AI', name = 'ASSISTANT';
       if (role === 'user') { avatar = 'USR'; name = 'OPERATOR'; }
       else if (role === 'reasoning') { avatar = 'THK'; name = 'REASONING'; }
-      div.innerHTML = '<div class="msg-avatar">' + avatar + '</div><div class="msg-body"><div class="msg-header"><span class="msg-name">' + name + '</span><span class="msg-time">' + now + '</span></div><div class="msg-content"></div></div>';
+      let extra = '';
+      if (role === 'assistant' || role === 'reasoning') {
+        extra = '<span class="msg-play" title="Read aloud">&#x1F50A;</span>';
+      }
+      div.innerHTML = '<div class="msg-avatar">' + avatar + '</div><div class="msg-body"><div class="msg-header"><span class="msg-name">' + name + '</span><span class="msg-time">' + now + '</span>' + extra + '</div><div class="msg-content"></div></div>';
       const contentDiv = div.querySelector('.msg-content');
       contentDiv.textContent = content || '';
+      const playBtn = div.querySelector('.msg-play');
+      if (playBtn) {
+        playBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          playMessage(content);
+        });
+      }
       container.appendChild(div);
       container.scrollTop = container.scrollHeight;
       return div;
+    }
+
+    async function playMessage(text) {
+      if (!text || isPlaying) return;
+      const btn = document.querySelector('.msg-play.playing');
+      if (btn) btn.classList.remove('playing');
+      try {
+        const resp = await fetch('/api/tts', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            text: text,
+            lang: document.getElementById('lang').value,
+            voice: document.getElementById('voice').value,
+            steps: parseInt(document.getElementById('steps').value),
+            speed: parseFloat(document.getElementById('speed').value),
+          })
+        });
+        const data = await resp.json();
+        if (data.error) { log('TTS error: ' + data.error, 'warn'); return; }
+        const audio = new Audio('data:audio/wav;base64,' + data.audio);
+        audio.play();
+      } catch (e) {
+        log('TTS error: ' + e.message, 'warn');
+      }
     }
 
     function addOrUpdateAssistant(text) {
@@ -1296,6 +1744,7 @@ HTML = """<!DOCTYPE html>
       audio.play().catch(() => playNext());
     }
     function queueAudio(b64, durMs) {
+      if (voiceMuted) return;
       audioQueue.push({ b64, durMs });
       if (!isPlaying) playNext();
     }
@@ -1321,6 +1770,7 @@ HTML = """<!DOCTYPE html>
       setStatus('Streaming', 'active');
       currentAssistantEl = null;
       currentReasoningEl = null;
+      currentReasoningText = '';
       let firstText = true;
 
       let resp;
@@ -1380,6 +1830,7 @@ HTML = """<!DOCTYPE html>
                 attachCursor();
               } else if (data.type === 'reasoning') {
                 addReasoning(data.text);
+                currentReasoningText += data.text;
               } else if (data.type === 'audio') {
                 lastSynthMs = data.synth_ms || 0;
                 charsSynthesized += data.chars || 0;
@@ -1390,12 +1841,22 @@ HTML = """<!DOCTYPE html>
                 setStatus('TTS Error', '');
               } else if (data.type === 'done') {
                 currentReasoningEl = null;
+                let asstText = '';
                 if (currentAssistantEl) {
                   const c = currentAssistantEl.querySelector('.typing-cursor');
                   if (c) c.remove();
+                  asstText = currentAssistantEl.querySelector('.msg-content').textContent;
                 }
                 setStatus('Ready', '');
                 log('Response complete \\u00b7 ' + sentencesPlayed + ' sentence(s)', 'ok');
+                if (currentReasoningText) {
+                  currentConvMessages.push({ role: 'reasoning', content: currentReasoningText });
+                  currentReasoningText = '';
+                }
+                if (asstText) {
+                  currentConvMessages.push({ role: 'assistant', content: asstText });
+                }
+                saveCurrentConv().then(() => renderConvList());
               }
             } catch(e) { /* ignore */ }
           }
@@ -1415,6 +1876,7 @@ HTML = """<!DOCTYPE html>
       document.getElementById('initOverlay').classList.add('hidden');
       document.getElementById('messages').classList.remove('hidden');
       appendMessage('user', text);
+      currentConvMessages.push({ role: 'user', content: text });
       input.value = '';
       autoResize(input);
       onInputChange();
@@ -1436,7 +1898,9 @@ HTML = """<!DOCTYPE html>
 
     // STT via parakeet.cpp (local, on-device)
     let pttHeld = false;
-    let spaceHeld = false;
+    let shiftTapCount = 0;
+    let shiftTapTimer = null;
+    let shiftIsDown = false;
     let sttPrefix = '';
     let mediaStream = null;
     let audioContext = null;
@@ -1459,7 +1923,7 @@ HTML = """<!DOCTYPE html>
     }
 
     async function startPTT() {
-      if (isBusy) return;
+      if (isBusy || pttHeld) return;
       const current = document.getElementById('userInput').value;
       sttPrefix = current ? (current.endsWith(' ') ? current : current + ' ') : '';
       try {
@@ -1485,6 +1949,7 @@ HTML = """<!DOCTYPE html>
     }
 
     async function stopPTT() {
+      if (!pttHeld) return;
       pttHeld = false;
       if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor = null; }
       if (audioContext) { await audioContext.close(); audioContext = null; }
@@ -1533,23 +1998,34 @@ HTML = """<!DOCTYPE html>
     pttBtn.addEventListener('touchcancel', () => stopPTT());
 
     document.addEventListener('keydown', e => {
-      if (e.code === 'Space' && !spaceHeld && document.activeElement !== document.getElementById('userInput')) {
-        spaceHeld = true;
-        e.preventDefault();
-        startPTT();
+      if (e.key === 'Shift' && !shiftIsDown) {
+        shiftIsDown = true;
+        shiftTapCount++;
+        if (shiftTapCount === 1) {
+          shiftTapTimer = setTimeout(() => { shiftTapCount = 0; }, 400);
+        } else if (shiftTapCount >= 2) {
+          clearTimeout(shiftTapTimer);
+          shiftTapCount = 0;
+          if (pttHeld) {
+            stopPTT();
+          } else {
+            e.preventDefault();
+            startPTT();
+          }
+        }
       }
     });
     document.addEventListener('keyup', e => {
-      if (e.code === 'Space' && spaceHeld) {
-        spaceHeld = false;
-        e.preventDefault();
-        stopPTT();
+      if (e.key === 'Shift') {
+        shiftIsDown = false;
       }
     });
 
-    setStatus('Ready', '');
-    log('Supertonic voice chat ready \u2014 STT via parakeet.cpp.', 'ok');
-    document.getElementById('userInput').focus();
+    initConversationHistory().then(() => {
+      setStatus('Ready', '');
+      log('Supertonic voice chat ready \u2014 STT via parakeet.cpp.', 'ok');
+      document.getElementById('userInput').focus();
+    });
   </script>
 </body>
 </html>"""
