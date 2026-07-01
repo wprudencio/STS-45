@@ -2210,12 +2210,11 @@ HTML = """<!DOCTYPE html>
     }
 
     const pttBtn = document.getElementById('pttBtn');
-    pttBtn.addEventListener('mousedown', e => { e.preventDefault(); startPTT(); });
-    pttBtn.addEventListener('mouseup', e => { e.preventDefault(); stopPTT(); });
-    pttBtn.addEventListener('mouseleave', () => { if (pttHeld) stopPTT(); });
-    pttBtn.addEventListener('touchstart', e => { e.preventDefault(); startPTT(); }, {passive: false});
-    pttBtn.addEventListener('touchend', e => { e.preventDefault(); stopPTT(); }, {passive: false});
-    pttBtn.addEventListener('touchcancel', () => stopPTT());
+    pttBtn.addEventListener('click', () => {
+      if (pttHeld) stopPTT();
+      else startPTT();
+    });
+    pttBtn.addEventListener('touchstart', e => { e.preventDefault(); }, {passive: false});
 
     document.addEventListener('keydown', e => {
       if (e.key === 'Shift' && !shiftIsDown) {
