@@ -867,7 +867,7 @@ HTML = """<!DOCTYPE html>
     }
     .msg-play:hover { color: var(--orange); background: var(--orange-soft); }
     .msg-play svg { width: 11px; height: 11px; }
-    .msg-play.playing { color: var(--orange); animation: pulse 0.9s ease-in-out infinite; }
+    .msg-play.playing { color: var(--orange); }
 
     .msg-copy {
       display: inline-flex;
@@ -1306,7 +1306,6 @@ HTML = """<!DOCTYPE html>
     ::-webkit-scrollbar-thumb:hover { background: var(--mid); }
 
     /* Mobile drawer */
-    .drawer-btn { display: none; }
     .drawer-backdrop {
       display: none;
       position: fixed;
@@ -1316,6 +1315,9 @@ HTML = """<!DOCTYPE html>
       z-index: 998;
     }
     .drawer-backdrop.open { display: block; }
+
+    .shell.collapsed { grid-template-columns: 0 1fr; }
+    .shell.collapsed .panel-left { overflow: hidden; padding: 0; border: none; }
 
     /* Responsive */
     @media (max-width: 900px) {
@@ -1332,6 +1334,7 @@ HTML = """<!DOCTYPE html>
         box-shadow: 4px 0 24px rgba(0,0,0,0.3);
       }
       .panel-left.open { transform: translateX(0); }
+      .shell.collapsed { grid-template-columns: 1fr; }
       .drawer-btn { display: inline-flex; }
       .topbar-right .live-pill { display: none; }
       .messages { padding: 12px; }
@@ -1576,6 +1579,7 @@ HTML = """<!DOCTYPE html>
 
   <script type="module">
     const sessionStart = Date.now();
+    let currentPlayingAudio = null;
     let isBusy = false;
     let messageQueue = [];
     let currentAssistantEl = null;
@@ -1992,15 +1996,27 @@ HTML = """<!DOCTYPE html>
     };
 
     window.toggleDrawer = function() {
-      const panel = document.querySelector('.panel-left');
-      const backdrop = document.getElementById('drawerBackdrop');
-      const isOpen = panel.classList.toggle('open');
-      backdrop.classList.toggle('open', isOpen);
+      const isMobile = window.matchMedia('(max-width: 900px)').matches;
+      if (isMobile) {
+        const panel = document.querySelector('.panel-left');
+        const backdrop = document.getElementById('drawerBackdrop');
+        const isOpen = panel.classList.toggle('open');
+        backdrop.classList.toggle('open', isOpen);
+      } else {
+        const collapsed = document.querySelector('.shell').classList.toggle('collapsed');
+        localStorage.setItem('supertonic_sidebar_collapsed', collapsed ? '1' : '');
+      }
     };
 
     window.closeDrawer = function() {
-      document.querySelector('.panel-left').classList.remove('open');
-      document.getElementById('drawerBackdrop').classList.remove('open');
+      const isMobile = window.matchMedia('(max-width: 900px)').matches;
+      if (isMobile) {
+        document.querySelector('.panel-left').classList.remove('open');
+        document.getElementById('drawerBackdrop').classList.remove('open');
+      } else {
+        document.querySelector('.shell').classList.remove('collapsed');
+        localStorage.setItem('supertonic_sidebar_collapsed', '');
+      }
     };
 
     // Close drawer when clicking a conversation item
@@ -2012,6 +2028,7 @@ HTML = """<!DOCTYPE html>
       sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
       moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
       play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>',
+      stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/></svg>',
       trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
     };
 
@@ -2028,6 +2045,10 @@ HTML = """<!DOCTYPE html>
       setIcon('themeIcon', 'moon');
     } else {
       setIcon('themeIcon', 'sun');
+    }
+
+    if (localStorage.getItem('supertonic_sidebar_collapsed') === '1') {
+      document.querySelector('.shell').classList.add('collapsed');
     }
 
     function setStatus(text, state) {
@@ -2113,6 +2134,14 @@ HTML = """<!DOCTYPE html>
 
     async function playMessage(text, btn) {
       if (!text) return;
+      if (btn && btn.classList.contains('playing')) {
+        if (currentPlayingAudio) { currentPlayingAudio.pause(); currentPlayingAudio.currentTime = 0; currentPlayingAudio = null; }
+        btn.classList.remove('playing');
+        btn.innerHTML = ICONS.play;
+        return;
+      }
+      if (currentPlayingAudio) { currentPlayingAudio.pause(); currentPlayingAudio.currentTime = 0; }
+      document.querySelectorAll('.msg-play.playing').forEach(b => { b.classList.remove('playing'); b.innerHTML = ICONS.play; });
       try {
         const resp = await fetch('/api/tts', {
           method: 'POST',
@@ -2128,16 +2157,18 @@ HTML = """<!DOCTYPE html>
         const data = await resp.json();
         if (data.error) { log('TTS error: ' + data.error, 'warn'); return; }
         const audio = new Audio('data:audio/wav;base64,' + data.audio);
+        currentPlayingAudio = audio;
         if (btn) {
-          document.querySelectorAll('.msg-play.playing').forEach(b => b.classList.remove('playing'));
           btn.classList.add('playing');
-          audio.onended = () => { btn.classList.remove('playing'); };
-          audio.onerror = () => { btn.classList.remove('playing'); };
+          btn.innerHTML = ICONS.stop;
+          audio.onended = () => { btn.classList.remove('playing'); btn.innerHTML = ICONS.play; currentPlayingAudio = null; };
+          audio.onerror = () => { btn.classList.remove('playing'); btn.innerHTML = ICONS.play; currentPlayingAudio = null; };
         }
         audio.play();
       } catch (e) {
         log('TTS error: ' + e.message, 'warn');
-        if (btn) btn.classList.remove('playing');
+        if (btn) { btn.classList.remove('playing'); btn.innerHTML = ICONS.play; }
+        currentPlayingAudio = null;
       }
     }
 
