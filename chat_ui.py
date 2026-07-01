@@ -234,9 +234,9 @@ def api_tts():
     try:
         vs = tts.get_voice_style(voice_name=voice)
         with tts_lock:
-            wav, dur = tts.synthesize(text=text, lang=lang, voice_style=vs, total_steps=steps, speed=speed)
+            wav, _dur = tts.synthesize(text=text, lang=lang, voice_style=vs, total_steps=steps, speed=speed)
         b64 = wav_to_base64(wav, tts.sample_rate)
-        return {"audio": b64, "dur_ms": dur}
+        return {"audio": b64}
     except Exception as e:
         return {"error": str(e)}, 500
 
