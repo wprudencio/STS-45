@@ -1498,6 +1498,7 @@ HTML = """<!DOCTYPE html>
     const sessionStart = Date.now();
     let audioQueue = [];
     let isPlaying = false;
+    let currentAudio = null;
     let voiceMuted = false;
     let isBusy = false;
     let currentAssistantEl = null;
@@ -2005,11 +2006,12 @@ HTML = """<!DOCTYPE html>
         const data = await resp.json();
         if (data.error) { log('TTS error: ' + data.error, 'warn'); return; }
         const audio = new Audio('data:audio/wav;base64,' + data.audio);
+        currentAudio = audio;
         if (btn) {
           document.querySelectorAll('.msg-play.playing').forEach(b => b.classList.remove('playing'));
           btn.classList.add('playing');
-          audio.onended = () => btn.classList.remove('playing');
-          audio.onerror = () => btn.classList.remove('playing');
+          audio.onended = () => { if (currentAudio === audio) currentAudio = null; btn.classList.remove('playing'); };
+          audio.onerror = () => { if (currentAudio === audio) currentAudio = null; btn.classList.remove('playing'); };
         }
         audio.play();
       } catch (e) {
@@ -2047,14 +2049,22 @@ HTML = """<!DOCTYPE html>
     }
 
     function playNext() {
-      if (audioQueue.length === 0) { isPlaying = false; return; }
+      if (audioQueue.length === 0) { isPlaying = false; currentAudio = null; return; }
       isPlaying = true;
       const item = audioQueue.shift();
       sentencesPlayed++;
       const audio = new Audio('data:audio/wav;base64,' + item.b64);
-      audio.onended = () => playNext();
-      audio.onerror = () => { log('Audio playback error', 'warn'); playNext(); };
-      audio.play().catch(() => playNext());
+      currentAudio = audio;
+      audio.onended = () => { if (currentAudio === audio) currentAudio = null; playNext(); };
+      audio.onerror = () => { log('Audio playback error', 'warn'); if (currentAudio === audio) currentAudio = null; playNext(); };
+      audio.play().catch(() => { if (currentAudio === audio) currentAudio = null; playNext(); });
+    }
+
+    function stopAllAudio() {
+      if (currentAudio) { try { currentAudio.pause(); currentAudio.currentTime = 0; } catch(e){} currentAudio = null; }
+      audioQueue = [];
+      isPlaying = false;
+      document.querySelectorAll('.msg-play.playing').forEach(b => b.classList.remove('playing'));
     }
     function queueAudio(b64, durMs) {
       if (voiceMuted) return;
@@ -2241,6 +2251,7 @@ HTML = """<!DOCTYPE html>
         log('Mic unavailable: page must be served over HTTPS or from localhost', 'warn');
         return;
       }
+      stopAllAudio();
       const current = document.getElementById('userInput').value;
       sttPrefix = current ? (current.endsWith(' ') ? current : current + ' ') : '';
       try {
