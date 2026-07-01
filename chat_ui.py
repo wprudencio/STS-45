@@ -2237,6 +2237,10 @@ HTML = """<!DOCTYPE html>
 
     async function startPTT() {
       if (isBusy || pttHeld) return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        log('Mic unavailable: page must be served over HTTPS or from localhost', 'warn');
+        return;
+      }
       const current = document.getElementById('userInput').value;
       sttPrefix = current ? (current.endsWith(' ') ? current : current + ' ') : '';
       try {
