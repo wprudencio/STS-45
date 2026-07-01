@@ -750,6 +750,63 @@ HTML = """<!DOCTYPE html>
       color: var(--mid);
     }
 
+    /* Per-conversation system prompt */
+    .conv-prompt {
+      flex-shrink: 0;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+    }
+    .conv-prompt-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px var(--sp3);
+      cursor: pointer;
+      user-select: none;
+      transition: background var(--dur);
+    }
+    .conv-prompt-header:hover { background: var(--surface-hover); }
+    .conv-prompt-header svg { width: 14px; height: 14px; color: var(--mid); }
+    .conv-prompt-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--charcoal);
+    }
+    .conv-prompt-badge {
+      font-size: 10px;
+      color: var(--mid);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .conv-prompt-toggle {
+      margin-left: auto;
+      color: var(--light);
+      display: inline-flex;
+      transition: transform var(--dur);
+    }
+    .conv-prompt-toggle svg { width: 12px; height: 12px; }
+    .conv-prompt.open .conv-prompt-toggle { transform: rotate(180deg); }
+    .conv-prompt-body {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 220ms ease;
+    }
+    .conv-prompt.open .conv-prompt-body { max-height: 160px; }
+    .conv-prompt .sys-prompt {
+      border: none !important;
+      border-top: 1px solid var(--border) !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      padding: 10px var(--sp3) !important;
+      min-height: 60px !important;
+      max-height: 140px !important;
+      background: var(--bg2) !important;
+    }
+    .conv-prompt.has-value .conv-prompt-label { color: var(--orange); }
+    .conv-prompt.has-value .conv-prompt-header svg { color: var(--orange); }
+
     /* Init overlay */
     .init-overlay {
       flex: 1;
@@ -1267,12 +1324,6 @@ HTML = """<!DOCTYPE html>
       <div class="conv-list" id="conversationList"></div>
       <div class="panel-section">
         <div class="section-row">
-          <span class="section-label">System Prompt</span>
-        </div>
-        <textarea class="sys-prompt" id="sysPrompt" rows="3" placeholder="Optional system instructions..."></textarea>
-      </div>
-      <div class="panel-section">
-        <div class="section-row">
           <span class="section-label">Settings</span>
           <span class="section-link" onclick="openModal()">Configure</span>
         </div>
@@ -1283,6 +1334,24 @@ HTML = """<!DOCTYPE html>
       <div class="chat-header">
         <span class="chat-header-title" id="chatTitle">Voice Session</span>
         <span class="chat-header-meta" id="sessionMeta">SES &middot; 00:00</span>
+      </div>
+
+      <div class="conv-prompt" id="convPromptWrap">
+        <div class="conv-prompt-header" onclick="toggleConvPrompt()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="conv-prompt-label">System Prompt</span>
+          <span class="conv-prompt-badge">this conversation</span>
+          <span class="conv-prompt-toggle" id="convPromptChevron">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </span>
+        </div>
+        <div class="conv-prompt-body" id="convPromptBody">
+          <textarea class="sys-prompt" id="sysPrompt" rows="2" placeholder="Set instructions for this conversation only. Leave empty for default behavior." oninput="onSysPromptChange()"></textarea>
+        </div>
       </div>
 
       <div class="init-overlay" id="initOverlay">
@@ -1619,7 +1688,9 @@ HTML = """<!DOCTYPE html>
       currentConvId = conv.id;
       currentConvMessages = conv.messages || [];
       localStorage.setItem('activeConvId', currentConvId);
-      if (conv.sysPrompt) document.getElementById('sysPrompt').value = conv.sysPrompt;
+      const sp = document.getElementById('sysPrompt');
+      sp.value = conv.sysPrompt || '';
+      updateSysPromptUI();
       const titleEl = document.getElementById('chatTitle');
       if (titleEl) titleEl.textContent = conv.title || 'Voice Session';
       if (currentConvMessages.length > 0) {
@@ -1646,7 +1717,29 @@ HTML = """<!DOCTYPE html>
       sentencesPlayed = 0; charsSynthesized = 0; lastSynthMs = 0;
       currentAssistantEl = null; currentReasoningEl = null;
       currentReasoningText = '';
+      const sp = document.getElementById('sysPrompt');
+      if (sp) { sp.value = ''; updateSysPromptUI(); }
     }
+
+    function updateSysPromptUI() {
+      const sp = document.getElementById('sysPrompt');
+      const wrap = document.getElementById('convPromptWrap');
+      if (!sp || !wrap) return;
+      const has = sp.value.trim().length > 0;
+      wrap.classList.toggle('has-value', has);
+      if (has) wrap.classList.add('open');
+    }
+
+    window.toggleConvPrompt = function() {
+      document.getElementById('convPromptWrap').classList.toggle('open');
+    };
+
+    let sysPromptSaveTimer = null;
+    window.onSysPromptChange = function() {
+      updateSysPromptUI();
+      clearTimeout(sysPromptSaveTimer);
+      sysPromptSaveTimer = setTimeout(() => { saveCurrentConv(); }, 400);
+    };
 
     function dbDelete(id) {
       return new Promise((resolve, reject) => {
@@ -1780,7 +1873,7 @@ HTML = """<!DOCTYPE html>
       const now = new Date().toISOString();
       const id = await dbAdd({
         title: 'New Chat',
-        sysPrompt: document.getElementById('sysPrompt').value,
+        sysPrompt: '',
         messages: [],
         createdAt: now,
         updatedAt: now
