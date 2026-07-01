@@ -5,7 +5,6 @@ Supertonic Voice Chat — Web UI com microfone + teclado + LLM + TTS local.
 
 import argparse
 import json
-import re
 import sys
 import threading
 import time
@@ -50,31 +49,6 @@ config = {
 # Histórico do LLM
 messages = [{"role": "system", "content": SYS_PROMPT}]
 
-# --- Sentence Buffer ---
-class SentenceBuffer:
-    def __init__(self):
-        self.buffer = ""
-
-    def add(self, token: str) -> Optional[str]:
-        self.buffer += token
-        if len(self.buffer) > 180:
-            s = self.buffer.strip()
-            self.buffer = ""
-            return s
-        if re.search(r"[.!?…]\s*$", self.buffer):
-            if not re.search(r"(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|etc)\.$", self.buffer):
-                s = self.buffer.strip()
-                self.buffer = ""
-                return s
-        return None
-
-    def flush(self) -> Optional[str]:
-        if self.buffer.strip():
-            s = self.buffer.strip()
-            self.buffer = ""
-            return s
-        return None
-
 
 # --- Streaming chat endpoint ---
 @app.route("/api/chat", methods=["POST"])
@@ -112,7 +86,6 @@ def api_chat():
 
     def generate():
         global messages
-        buf = SentenceBuffer()
 
         # Stream do LLM
         messages.append({"role": "user", "content": user_msg})
@@ -165,40 +138,6 @@ def api_chat():
                     has_content = True
                     content_parts.append(content)
                     yield f"data: {json.dumps({'type': 'text', 'text': content})}\n\n"
-
-                    # Detecta sentença completa → sintetiza TTS
-                    sentence = buf.add(content)
-                    if sentence is not None and len(sentence) > 3:
-                        try:
-                            with tts_lock:
-                                wav, dur = tts.synthesize(
-                                    text=sentence,
-                                    lang=config["lang"],
-                                    voice_style=style,
-                                    total_steps=config["steps"],
-                                    speed=config["speed"],
-                                )
-                            b64 = wav_to_base64(wav, tts.sample_rate)
-                            yield f"data: {json.dumps({'type': 'audio', 'data': b64})}\n\n"
-                        except Exception as e:
-                            yield f"data: {json.dumps({'type': 'error', 'text': f'TTS error: {e}'})}\n\n"
-
-        # Flush final
-        sentence = buf.flush()
-        if sentence and len(sentence) > 3:
-            try:
-                with tts_lock:
-                    wav, dur = tts.synthesize(
-                        text=sentence,
-                        lang=config["lang"],
-                        voice_style=style,
-                        total_steps=config["steps"],
-                        speed=config["speed"],
-                    )
-                b64 = wav_to_base64(wav, tts.sample_rate)
-                yield f"data: {json.dumps({'type': 'audio', 'data': b64})}\n\n"
-            except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'text': f'TTS error: {e}'})}\n\n"
 
         full = "".join(content_parts)
         messages.append({"role": "assistant", "content": full})
@@ -1426,12 +1365,6 @@ HTML = """<!DOCTYPE html>
       <span class="status-text" id="statusText">Ready</span>
     </div>
     <div class="topbar-right">
-      <button class="icon-btn" id="voiceToggleBtn" onclick="toggleVoice()" title="Toggle voice output" aria-label="Toggle voice">
-        <svg id="voiceIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
-        </svg>
-      </button>
       <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
         <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="4"/>
@@ -1643,17 +1576,10 @@ HTML = """<!DOCTYPE html>
 
   <script type="module">
     const sessionStart = Date.now();
-    let audioQueue = [];
-    let isPlaying = false;
-    let currentAudio = null;
-    let voiceMuted = false;
     let isBusy = false;
     let messageQueue = [];
     let currentAssistantEl = null;
     let currentReasoningEl = null;
-    let sentencesPlayed = 0;
-    let charsSynthesized = 0;
-    let lastSynthMs = 0;
 
     const DEFAULT_API_URL = '{{ default_api_url }}';
     const DEFAULT_STT_API_URL = '{{ default_stt_api_url }}';
@@ -1867,7 +1793,6 @@ HTML = """<!DOCTYPE html>
       document.getElementById('messages').innerHTML = '';
       document.getElementById('messages').classList.add('hidden');
       document.getElementById('initOverlay').classList.remove('hidden');
-      sentencesPlayed = 0; charsSynthesized = 0; lastSynthMs = 0;
       currentAssistantEl = null; currentReasoningEl = null;
       currentReasoningText = '';
       const sp = document.getElementById('sysPrompt');
@@ -2084,8 +2009,6 @@ HTML = """<!DOCTYPE html>
     });
 
     const ICONS = {
-      voiceOn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>',
-      voiceOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>',
       sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
       moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
       play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>',
@@ -2093,23 +2016,6 @@ HTML = """<!DOCTYPE html>
     };
 
     function setIcon(id, key) { document.getElementById(id).innerHTML = ICONS[key]; }
-
-    // Voice mute toggle
-    window.toggleVoice = function() {
-      voiceMuted = !voiceMuted;
-      const btn = document.getElementById('voiceToggleBtn');
-      btn.classList.toggle('active', voiceMuted);
-      setIcon('voiceIcon', voiceMuted ? 'voiceOff' : 'voiceOn');
-      btn.title = voiceMuted ? 'Voice output muted' : 'Voice output on';
-      localStorage.setItem('supertonic_voice_muted', voiceMuted ? '1' : '');
-      log('Voice output ' + (voiceMuted ? 'muted' : 'unmuted'), 'hl');
-    };
-    if (localStorage.getItem('supertonic_voice_muted') === '1') {
-      voiceMuted = true;
-      document.getElementById('voiceToggleBtn').classList.add('active');
-      setIcon('voiceIcon', 'voiceOff');
-      document.getElementById('voiceToggleBtn').title = 'Voice output muted';
-    }
 
     // Theme toggle (default = dark, toggle to light)
     window.toggleTheme = function() {
@@ -2222,12 +2128,11 @@ HTML = """<!DOCTYPE html>
         const data = await resp.json();
         if (data.error) { log('TTS error: ' + data.error, 'warn'); return; }
         const audio = new Audio('data:audio/wav;base64,' + data.audio);
-        currentAudio = audio;
         if (btn) {
           document.querySelectorAll('.msg-play.playing').forEach(b => b.classList.remove('playing'));
           btn.classList.add('playing');
-          audio.onended = () => { if (currentAudio === audio) currentAudio = null; btn.classList.remove('playing'); };
-          audio.onerror = () => { if (currentAudio === audio) currentAudio = null; btn.classList.remove('playing'); };
+          audio.onended = () => { btn.classList.remove('playing'); };
+          audio.onerror = () => { btn.classList.remove('playing'); };
         }
         audio.play();
       } catch (e) {
@@ -2262,30 +2167,6 @@ HTML = """<!DOCTYPE html>
       const cursor = document.createElement('span');
       cursor.className = 'typing-cursor';
       content.appendChild(cursor);
-    }
-
-    function playNext() {
-      if (audioQueue.length === 0) { isPlaying = false; currentAudio = null; return; }
-      isPlaying = true;
-      const item = audioQueue.shift();
-      sentencesPlayed++;
-      const audio = new Audio('data:audio/wav;base64,' + item.b64);
-      currentAudio = audio;
-      audio.onended = () => { if (currentAudio === audio) currentAudio = null; playNext(); };
-      audio.onerror = () => { log('Audio playback error', 'warn'); if (currentAudio === audio) currentAudio = null; playNext(); };
-      audio.play().catch(() => { if (currentAudio === audio) currentAudio = null; playNext(); });
-    }
-
-    function stopAllAudio() {
-      if (currentAudio) { try { currentAudio.pause(); currentAudio.currentTime = 0; } catch(e){} currentAudio = null; }
-      audioQueue = [];
-      isPlaying = false;
-      document.querySelectorAll('.msg-play.playing').forEach(b => b.classList.remove('playing'));
-    }
-    function queueAudio(b64, durMs) {
-      if (voiceMuted) return;
-      audioQueue.push({ b64, durMs });
-      if (!isPlaying) playNext();
     }
 
     window.onInputChange = function() {
@@ -2369,11 +2250,6 @@ HTML = """<!DOCTYPE html>
               } else if (data.type === 'reasoning') {
                 addReasoning(data.text);
                 currentReasoningText += data.text;
-              } else if (data.type === 'audio') {
-                lastSynthMs = data.synth_ms || 0;
-                charsSynthesized += data.chars || 0;
-                queueAudio(data.data, data.synth_ms);
-                log('Synth \\u00b7 ' + (data.synth_ms || '?') + 'ms \\u00b7 ' + (data.chars || '?') + 'ch', 'ok');
               } else if (data.type === 'error') {
                 log('TTS error: ' + data.text, 'warn');
                 setStatus('TTS Error', '');
@@ -2390,7 +2266,7 @@ HTML = """<!DOCTYPE html>
                   addCodeCopyButtons(contentEl);
                 }
                 setStatus('Ready', '');
-                log('Response complete \\u00b7 ' + sentencesPlayed + ' sentence(s)', 'ok');
+                log('Response complete', 'ok');
                 if (currentReasoningText) {
                   currentConvMessages.push({ role: 'reasoning', content: currentReasoningText });
                   currentReasoningText = '';
@@ -2438,9 +2314,6 @@ HTML = """<!DOCTYPE html>
       document.getElementById('messages').innerHTML = '';
       document.getElementById('messages').classList.add('hidden');
       document.getElementById('initOverlay').classList.remove('hidden');
-      sentencesPlayed = 0;
-      charsSynthesized = 0;
-      lastSynthMs = 0;
       currentAssistantEl = null;
       currentReasoningEl = null;
       try { await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message:'/clear'})}); } catch(e){}
@@ -2479,7 +2352,6 @@ HTML = """<!DOCTYPE html>
         log('Mic unavailable: page must be served over HTTPS or from localhost', 'warn');
         return;
       }
-      stopAllAudio();
       const current = document.getElementById('userInput').value;
       sttPrefix = current ? (current.endsWith(' ') ? current : current + ' ') : '';
       try {
