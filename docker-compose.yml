@@ -21,7 +21,7 @@ services:
       - "8081:8080"
     volumes:
       - ./models:/models:ro
-    command: --model /models/tdt_ctc-110m-q5_k.gguf
+    command: --model /models/tdt-0.6b-v2-q4_k.gguf
     restart: unless-stopped
 
 volumes:
