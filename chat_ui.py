@@ -2138,7 +2138,7 @@ HTML = """<!DOCTYPE html>
       if (typeof marked !== 'undefined') {
         return marked.parse(text);
       }
-      return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+      return text.split('<').join('&lt;').split('>').join('&gt;').split('\\n').join('<br>');
     }
 
     function addCodeCopyButtons(container) {
