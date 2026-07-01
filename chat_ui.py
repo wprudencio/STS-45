@@ -120,7 +120,7 @@ def api_chat():
             "model": config["model"],
             "messages": messages,
             "stream": True,
-            "max_tokens": 512,
+            "max_tokens": int(data.get("max_tokens", 2048)),
             "temperature": 0.7,
         }
 
@@ -1472,6 +1472,10 @@ HTML = """<!DOCTYPE html>
         </div>
         <hr style="border:none; border-top:1px solid #d4d4d4; margin:0">
         <div>
+          <div class="input-lbl">Max Tokens (LLM response length)</div>
+          <input class="field-input" type="number" id="maxTokens" min="64" max="32768" step="64" value="2048" placeholder="2048">
+        </div>
+        <div>
           <div class="input-lbl">LLM API URL</div>
           <input class="field-input" type="text" id="apiUrl" placeholder="http://127.0.0.1:8080/v1/chat/completions">
         </div>
@@ -1501,6 +1505,7 @@ HTML = """<!DOCTYPE html>
     let currentAudio = null;
     let voiceMuted = false;
     let isBusy = false;
+    let messageQueue = [];
     let currentAssistantEl = null;
     let currentReasoningEl = null;
     let sentencesPlayed = 0;
@@ -1545,6 +1550,7 @@ HTML = """<!DOCTYPE html>
       const lang = localStorage.getItem('supertonic_lang') || 'en';
       const steps = parseInt(localStorage.getItem('supertonic_steps') || '5', 10);
       const speed = parseFloat(localStorage.getItem('supertonic_speed') || '1.15');
+      const maxTokens = parseInt(localStorage.getItem('supertonic_max_tokens') || '2048', 10);
       document.getElementById('apiUrl').value = url;
       document.getElementById('apiKey').value = key;
       document.getElementById('sttApiUrl').value = stt;
@@ -1556,6 +1562,7 @@ HTML = """<!DOCTYPE html>
       document.getElementById('speed').value = speed;
       document.getElementById('speedVal').textContent = speed.toFixed(2);
       updateSlider(document.getElementById('speed'));
+      document.getElementById('maxTokens').value = maxTokens;
       syncTopbar();
     }
     window.saveConnection = function() {
@@ -1566,6 +1573,7 @@ HTML = """<!DOCTYPE html>
       const lang = document.getElementById('lang').value;
       const steps = document.getElementById('steps').value;
       const speed = document.getElementById('speed').value;
+      const maxTokens = parseInt(document.getElementById('maxTokens').value) || 2048;
       localStorage.setItem('supertonic_api_url', url);
       localStorage.setItem('supertonic_api_key', key);
       localStorage.setItem('supertonic_stt_api_url', stt);
@@ -1573,6 +1581,7 @@ HTML = """<!DOCTYPE html>
       localStorage.setItem('supertonic_lang', lang);
       localStorage.setItem('supertonic_steps', steps);
       localStorage.setItem('supertonic_speed', speed);
+      localStorage.setItem('supertonic_max_tokens', maxTokens);
       closeModal();
       log('Settings saved.', 'ok');
     };
@@ -2088,8 +2097,6 @@ HTML = """<!DOCTYPE html>
 
     async function sendToServer(message) {
       isBusy = true;
-      document.getElementById('sendBtn').disabled = true;
-      document.getElementById('pttBtn').disabled = true;
       setStatus('Streaming', 'active');
       currentAssistantEl = null;
       currentReasoningEl = null;
@@ -2107,6 +2114,7 @@ HTML = """<!DOCTYPE html>
             voice: document.getElementById('voice').value,
             steps: parseInt(document.getElementById('steps').value),
             speed: parseFloat(document.getElementById('speed').value),
+            max_tokens: parseInt(document.getElementById('maxTokens').value) || 2048,
             api_url: document.getElementById('apiUrl').value.trim(),
             api_key: document.getElementById('apiKey').value.trim(),
             sys_prompt: document.getElementById('sysPrompt').value,
@@ -2116,8 +2124,8 @@ HTML = """<!DOCTYPE html>
         setStatus('Error', '');
         log('Connection error: ' + err.message, 'warn');
         isBusy = false;
-        document.getElementById('pttBtn').disabled = false;
         onInputChange();
+        processQueue();
         return;
       }
 
@@ -2125,8 +2133,8 @@ HTML = """<!DOCTYPE html>
         setStatus('Error ' + resp.status, '');
         log('Server error ' + resp.status, 'warn');
         isBusy = false;
-        document.getElementById('pttBtn').disabled = false;
         onInputChange();
+        processQueue();
         return;
       }
 
@@ -2187,12 +2195,10 @@ HTML = """<!DOCTYPE html>
       }
 
       isBusy = false;
-      document.getElementById('pttBtn').disabled = false;
       onInputChange();
     }
 
     window.sendText = function() {
-      if (isBusy) return;
       const input = document.getElementById('userInput');
       const text = input.value.trim();
       if (!text) return;
@@ -2203,8 +2209,19 @@ HTML = """<!DOCTYPE html>
       input.value = '';
       autoResize(input);
       onInputChange();
-      sendToServer(text);
+      messageQueue.push(text);
+      if (messageQueue.length > 1) {
+        log('Queued · ' + (messageQueue.length - 1) + ' waiting', 'hl');
+      }
+      processQueue();
     };
+
+    async function processQueue() {
+      if (isBusy || messageQueue.length === 0) return;
+      const text = messageQueue.shift();
+      await sendToServer(text);
+      processQueue();
+    }
 
     window.clearChat = async function() {
       document.getElementById('messages').innerHTML = '';
