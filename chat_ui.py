@@ -928,6 +928,23 @@ HTML = """<!DOCTYPE html>
     .msg-play svg { width: 12px; height: 12px; }
     .msg-play.playing { color: var(--orange); animation: pulse 0.9s ease-in-out infinite; }
 
+    .msg-copy {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+      color: var(--light);
+      border-radius: 4px;
+      transition: all var(--dur);
+    }
+    .msg-copy:hover { color: var(--orange); background: var(--orange-soft); }
+    .dark .msg-copy:hover { background: rgba(234,88,12,0.15); }
+    .msg-copy svg { width: 12px; height: 12px; }
+    .msg-copy.copied { color: var(--success); background: rgba(22,163,74,0.1); }
+    .dark .msg-copy.copied { background: rgba(22,163,74,0.18); }
+
     .msg-content {
       font-size: 15px;
       line-height: 1.6;
@@ -1982,6 +1999,7 @@ HTML = """<!DOCTYPE html>
       if (role === 'assistant' || role === 'reasoning') {
         extra = '<span class="msg-play" title="Read aloud"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor" stroke="none"/></svg></span>';
       }
+      extra += '<span class="msg-copy" title="Copy text"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>';
       div.innerHTML = '<div class="msg-avatar">' + avatar + '</div><div class="msg-body"><div class="msg-header"><span class="msg-name">' + name + '</span><span class="msg-time">' + now + '</span>' + extra + '</div><div class="msg-content"></div></div>';
       const contentDiv = div.querySelector('.msg-content');
       contentDiv.textContent = content || '';
@@ -1991,6 +2009,17 @@ HTML = """<!DOCTYPE html>
           e.stopPropagation();
           const text = contentDiv.textContent.trim();
           playMessage(text, playBtn);
+        });
+      }
+      const copyBtn = div.querySelector('.msg-copy');
+      if (copyBtn) {
+        copyBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          const text = contentDiv.textContent;
+          navigator.clipboard.writeText(text).then(() => {
+            copyBtn.classList.add('copied');
+            setTimeout(() => copyBtn.classList.remove('copied'), 1200);
+          }).catch(() => { log('Copy failed', 'warn'); });
         });
       }
       container.appendChild(div);
