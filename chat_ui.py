@@ -1272,10 +1272,34 @@ HTML = """<!DOCTYPE html>
     ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: var(--light); }
 
+    /* Mobile drawer */
+    .drawer-btn { display: none; }
+    .drawer-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      backdrop-filter: blur(2px);
+      z-index: 998;
+    }
+    .drawer-backdrop.open { display: block; }
+
     /* Responsive */
     @media (max-width: 900px) {
-      .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-      .panel-left { max-height: 220px; border-right: none; border-bottom: 1px solid var(--border); }
+      .shell { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+      .panel-left {
+        position: fixed;
+        top: 0; left: 0; bottom: 0;
+        width: 280px;
+        max-height: none;
+        z-index: 999;
+        transform: translateX(-100%);
+        transition: transform 220ms var(--ease);
+        border-right: 1px solid var(--border);
+        box-shadow: 4px 0 20px rgba(0,0,0,0.15);
+      }
+      .panel-left.open { transform: translateX(0); }
+      .drawer-btn { display: inline-flex; }
       .topbar-right .live-pill { display: none; }
       .messages { padding: 16px; }
       .message { gap: 8px; }
@@ -1283,7 +1307,6 @@ HTML = """<!DOCTYPE html>
     }
     @media (max-width: 600px) {
       .brand-name { display: none; }
-      .panel-left { max-height: 180px; }
       .input-area { padding: 8px 12px 6px; }
     }
   </style>
@@ -1291,6 +1314,13 @@ HTML = """<!DOCTYPE html>
 <body>
 
   <header class="topbar">
+    <button class="icon-btn drawer-btn" id="drawerBtn" onclick="toggleDrawer()" title="Menu" aria-label="Open menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="6" x2="21" y2="6"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+        <line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
     <div class="brand">
       <div class="brand-mark">
         <span></span><span></span><span></span><span></span>
@@ -1316,6 +1346,8 @@ HTML = """<!DOCTYPE html>
       </button>
     </div>
   </header>
+
+  <div class="drawer-backdrop" id="drawerBackdrop" onclick="closeDrawer()"></div>
 
   <div class="shell">
 
@@ -1939,6 +1971,23 @@ HTML = """<!DOCTYPE html>
     window.toggleLog = function() {
       document.getElementById('footerLog').classList.toggle('open');
     };
+
+    window.toggleDrawer = function() {
+      const panel = document.querySelector('.panel-left');
+      const backdrop = document.getElementById('drawerBackdrop');
+      const isOpen = panel.classList.toggle('open');
+      backdrop.classList.toggle('open', isOpen);
+    };
+
+    window.closeDrawer = function() {
+      document.querySelector('.panel-left').classList.remove('open');
+      document.getElementById('drawerBackdrop').classList.remove('open');
+    };
+
+    // Close drawer when clicking a conversation item
+    document.addEventListener('click', e => {
+      if (e.target.closest('.conv-item')) closeDrawer();
+    });
 
     const ICONS = {
       voiceOn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>',
