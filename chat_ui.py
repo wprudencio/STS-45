@@ -132,6 +132,7 @@ def api_chat():
         try:
             r = requests.post(api_url, json=payload, headers=headers, stream=True, timeout=120)
             r.raise_for_status()
+            r.encoding = 'utf-8'
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
             return
