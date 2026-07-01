@@ -77,7 +77,7 @@ def api_chat():
         messages[0] = {"role": "system", "content": sys_prompt}
     if not api_url:
         api_url = config["api_url"]
-    if "voice" in data:
+    if "voice" in data and tts is not None:
         try:
             global style
             style = tts.get_voice_style(voice_name=data["voice"])
@@ -171,6 +171,8 @@ def api_tts():
     voice = data.get("voice", config["voice"])
     steps = int(data.get("steps", config["steps"]))
     speed = float(data.get("speed", config["speed"]))
+    if tts is None:
+        return {"error": "TTS still loading (model download in progress)"}, 503
     try:
         vs = tts.get_voice_style(voice_name=voice)
         with tts_lock:
@@ -2351,7 +2353,19 @@ HTML = """<!DOCTYPE html>
       log('Conversation cleared.', 'ok');
     };
 
-    // STT via parakeet.cpp (local, on-device)
+    // STT via parakeet.cpp (local, on-device) — real-time rolling chunks.
+    // The parakeet.cpp-server is a one-shot WAV transcriber (no streaming
+    // endpoint), so we drive "text appears while talking" from the browser:
+    //   - ScriptProcessor collects 16 kHz mono PCM.
+    //   - A VAD detects pauses; each time you stop talking for ~650 ms the
+    //     buffered utterance is sent off and its transcript is *appended* to
+    //     the textarea, so committed text never gets re-transcribed.
+    //   - While you are still talking, short rolling partials of the current
+    //     (uncommitted) utterance are sent too and shown as a live tail,
+    //     replaced on each tick — so words appear as you speak.
+    //   - Requests are serialized (one in flight + at most one queued commit),
+    //     to avoid pile-up on slow CPUs. This is also why long audios no
+    //     longer feel slow: we never send the whole recording.
     let pttHeld = false;
     let shiftTapCount = 0;
     let shiftTapTimer = null;
@@ -2360,7 +2374,27 @@ HTML = """<!DOCTYPE html>
     let mediaStream = null;
     let audioContext = null;
     let scriptProcessor = null;
-    let sttChunks = [];
+
+    const STT_SR = 16000;
+    const VAD_RMS = 0.012;
+    const SILENCE_MS = 650;        // trailing silence that finalizes an utterance
+    const MIN_UTT_SAMPLES = Math.floor(STT_SR * 0.30);
+    const MAX_UTT_SAMPLES = Math.floor(STT_SR * 12);    // force-split an over-long run
+    const MAX_PARTIAL_SAMPLES = Math.floor(STT_SR * 6); // stop live partials past this
+    const PARTIAL_DELTA_SAMPLES = Math.floor(STT_SR * 0.35);
+    const TICK_MS = 350;
+
+    let sttTick = null;
+    let uttChunks = [];
+    let uttCount = 0;
+    let lastVoiceAt = 0;
+    let lastSentPartialCount = 0;
+    let committedText = '';
+    let livePartial = '';
+    let partialGen = 0;       // bump to invalidate in-flight partial results
+    let sttActive = null;     // a Promise while a transcription is running
+    let commitPending = false; // schedule a commit once the current job finishes
+    let stopDeferred = null;  // {resolve} to finish stopPTT after queued work
 
     function encodeWAV(samples, sampleRate) {
       const buf = new ArrayBuffer(44 + samples.length * 2);
@@ -2377,6 +2411,90 @@ HTML = """<!DOCTYPE html>
       return new Blob([buf], { type: 'audio/wav' });
     }
 
+    function joinSpace(a, b) {
+      if (!a) return b;
+      if (!b) return a;
+      return a + (a.endsWith(' ') ? '' : ' ') + b;
+    }
+
+    function collectUtt() {
+      const out = new Float32Array(uttCount);
+      let off = 0;
+      for (const c of uttChunks) { out.set(c, off); off += c.length; }
+      return out;
+    }
+
+    function renderSTT() {
+      const input = document.getElementById('userInput');
+      input.value = joinSpace(committedText, livePartial);
+      autoResize(input);
+      onInputChange();
+    }
+
+    async function sttTranscribe(samples) {
+      try {
+        const wav = encodeWAV(samples, STT_SR);
+        const fd = new FormData();
+        fd.append('file', wav, 'utt.wav');
+        fd.append('lang', document.getElementById('lang').value);
+        fd.append('stt_api', document.getElementById('sttApiUrl').value.trim());
+        const resp = await fetch('/api/stt', { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (data.error) { log('STT error: ' + data.error, 'warn'); return ''; }
+        return (data.text || '').replace(/^\\s+|\\s+$/g, '');
+      } catch (e) {
+        log('STT error: ' + e.message, 'warn');
+        return '';
+      }
+    }
+
+    async function flushCommit() {
+      const samples = collectUtt();
+      uttChunks = []; uttCount = 0; lastSentPartialCount = 0;
+      partialGen++;
+      livePartial = '';
+      renderSTT();
+      const text = await sttTranscribe(samples);
+      if (text) committedText = joinSpace(committedText, text);
+      renderSTT();
+    }
+
+    async function sendPartial() {
+      const samples = collectUtt();
+      lastSentPartialCount = uttCount;
+      const gen = partialGen;
+      const text = await sttTranscribe(samples);
+      if (gen !== partialGen) return;          // superseded by a commit / stop
+      livePartial = text;
+      renderSTT();
+    }
+
+    function enqueue(promise) {
+      sttActive = promise.then(() => { sttActive = null; pump(); });
+    }
+
+    function pump() {
+      if (sttActive) return;
+      if (commitPending) { commitPending = false; enqueue(flushCommit()); return; }
+      if (stopDeferred) { const d = stopDeferred; stopDeferred = null; d.resolve(); }
+    }
+
+    function sttTickFn() {
+      if (!pttHeld) return;
+      const needCommit = uttCount >= MIN_UTT_SAMPLES &&
+        (performance.now() - lastVoiceAt >= SILENCE_MS || uttCount >= MAX_UTT_SAMPLES);
+      if (needCommit) {
+        if (sttActive) commitPending = true;
+        else enqueue(flushCommit());
+        return;
+      }
+      if (sttActive || commitPending) return;
+      if (uttCount < MIN_UTT_SAMPLES) return;
+      if (uttCount >= MAX_PARTIAL_SAMPLES) return;
+      if (uttCount - lastSentPartialCount < PARTIAL_DELTA_SAMPLES) return;
+      enqueue(sendPartial());
+    }
+
     async function startPTT() {
       if (isBusy || pttHeld) return;
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -2385,6 +2503,12 @@ HTML = """<!DOCTYPE html>
       }
       const current = document.getElementById('userInput').value;
       sttPrefix = current ? (current.endsWith(' ') ? current : current + ' ') : '';
+      committedText = sttPrefix;
+      livePartial = '';
+      uttChunks = []; uttCount = 0;
+      lastSentPartialCount = 0;
+      partialGen = 0;
+      sttActive = null; commitPending = false; stopDeferred = null;
       try {
         mediaStream = await navigator.mediaDevices.getUserMedia({
           audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
@@ -2392,16 +2516,22 @@ HTML = """<!DOCTYPE html>
         audioContext = new AudioContext({ sampleRate: 16000 });
         const source = audioContext.createMediaStreamSource(mediaStream);
         scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-        sttChunks = [];
         scriptProcessor.onaudioprocess = (e) => {
-          sttChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+          const d = new Float32Array(e.inputBuffer.getChannelData(0));
+          let sum = 0;
+          for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+          if (Math.sqrt(sum / d.length) > VAD_RMS) lastVoiceAt = performance.now();
+          uttChunks.push(d);
+          uttCount += d.length;
         };
         source.connect(scriptProcessor);
         scriptProcessor.connect(audioContext.destination);
         pttHeld = true;
+        lastVoiceAt = performance.now();
         document.getElementById('pttBtn').classList.add('recording');
         setStatus('Recording', 'rec');
-        log('Recording via parakeet.cpp STT...', 'hl');
+        sttTick = setInterval(sttTickFn, TICK_MS);
+        log('Recording (real-time STT)...', 'hl');
       } catch (e) {
         log('Mic error: ' + e.message, 'warn');
       }
@@ -2410,41 +2540,31 @@ HTML = """<!DOCTYPE html>
     async function stopPTT() {
       if (!pttHeld) return;
       pttHeld = false;
+      if (sttTick) { clearInterval(sttTick); sttTick = null; }
       if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor = null; }
-      if (audioContext) { await audioContext.close(); audioContext = null; }
-      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+      if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); }
+      const hadTail = uttCount >= MIN_UTT_SAMPLES;
+      partialGen++;                  // invalidate any in-flight partial
+      livePartial = '';
+      renderSTT();
+      if (hadTail) {
+        if (sttActive) commitPending = true; else enqueue(flushCommit());
+      } else {
+        commitPending = false;
+      }
+      if (audioContext) { try { await audioContext.close(); } catch (e) {} audioContext = null; }
+      if (mediaStream) { mediaStream = null; }
       document.getElementById('pttBtn').classList.remove('recording');
-      if (sttChunks.length === 0) {
-        setStatus('Ready', '');
-        return;
-      }
       setStatus('Transcribing', 'active');
-      const total = sttChunks.reduce((s, c) => s + c.length, 0);
-      const samples = new Float32Array(total);
-      let offset = 0;
-      for (const c of sttChunks) { samples.set(c, offset); offset += c.length; }
-      const wav = encodeWAV(samples, 16000);
-      sttChunks = [];
-      try {
-        const formData = new FormData();
-        formData.append('file', wav, 'recording.wav');
-        formData.append('lang', document.getElementById('lang').value);
-        formData.append('stt_api', document.getElementById('sttApiUrl').value.trim());
-        const resp = await fetch('/api/stt', { method: 'POST', body: formData });
-        const data = await resp.json();
-        if (data.text) {
-          const input = document.getElementById('userInput');
-          input.value = (sttPrefix + data.text).replace(/^\\s+|\\s+$/g, '');
-          autoResize(input);
-          onInputChange();
-          log('STT: ' + data.text.substring(0, 50) + (data.text.length > 50 ? '...' : ''), 'ok');
-        } else if (data.error) {
-          log('STT error: ' + data.error, 'warn');
-        }
-      } catch (e) {
-        log('STT error: ' + e.message, 'warn');
+      if (sttActive || commitPending) {
+        await new Promise(res => { stopDeferred = { resolve: res }; pump(); });
       }
-      sttPrefix = '';
+      livePartial = ''; renderSTT();
+      const input = document.getElementById('userInput');
+      input.value = input.value.replace(/^\\s+|\\s+$/g, '');
+      autoResize(input); onInputChange();
+      sttPrefix = ''; committedText = '';
+      if (input.value) log('STT: ' + input.value.substring(0, 50) + (input.value.length > 50 ? '...' : ''), 'ok');
       setStatus('Ready', '');
     }
 
@@ -2502,6 +2622,16 @@ def index():
     )
 
 
+def _load_tts_background():
+    global tts, style, config
+    try:
+        tts = TTS(auto_download=True)
+        style = tts.get_voice_style(voice_name=config["voice"])
+        print("✅ TTS loaded")
+    except Exception as e:
+        print(f"⚠️ TTS loading failed (will retry on first use): {e}")
+
+
 def main():
     global tts, style, config
 
@@ -2527,9 +2657,9 @@ def main():
         "model": args.model,
     })
 
-    print("🚀 Loading Supertonic TTS...")
-    tts = TTS(auto_download=True)
-    style = tts.get_voice_style(voice_name=config["voice"])
+    print("🚀 Loading Supertonic TTS in background...")
+    t = threading.Thread(target=_load_tts_background, daemon=True)
+    t.start()
 
     print(f"""
 ╔══════════════════════════════════════════╗
