@@ -293,6 +293,7 @@ HTML = """<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -978,6 +979,101 @@ HTML = """<!DOCTYPE html>
       white-space: pre-wrap;
       border-radius: var(--r2);
     }
+
+    /* Markdown rendered content */
+    .message.assistant .msg-content h1,
+    .message.assistant .msg-content h2,
+    .message.assistant .msg-content h3,
+    .message.assistant .msg-content h4 {
+      margin: 0.8em 0 0.4em;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .message.assistant .msg-content h1 { font-size: 1.3em; }
+    .message.assistant .msg-content h2 { font-size: 1.15em; }
+    .message.assistant .msg-content h3 { font-size: 1.05em; }
+    .message.assistant .msg-content ul,
+    .message.assistant .msg-content ol {
+      margin: 0.4em 0 0.6em 1.5em;
+    }
+    .message.assistant .msg-content li { margin-bottom: 0.2em; }
+    .message.assistant .msg-content blockquote {
+      border-left: 3px solid var(--orange);
+      padding: 4px 12px;
+      margin: 0.5em 0;
+      color: var(--mid);
+      background: var(--surface);
+      border-radius: 0 var(--r1) var(--r1) 0;
+    }
+    .message.assistant .msg-content pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--r1);
+      padding: 10px 14px;
+      margin: 0.5em 0;
+      overflow-x: auto;
+      position: relative;
+    }
+    .message.assistant .msg-content pre code {
+      background: none;
+      padding: 0;
+      border-radius: 0;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .message.assistant .msg-content hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0.8em 0;
+    }
+    .message.assistant .msg-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.5em 0;
+      font-size: 13px;
+    }
+    .message.assistant .msg-content th,
+    .message.assistant .msg-content td {
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      text-align: left;
+    }
+    .message.assistant .msg-content th {
+      background: var(--surface);
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .message.assistant .msg-content a {
+      color: var(--orange);
+      text-decoration: none;
+    }
+    .message.assistant .msg-content a:hover { text-decoration: underline; }
+    .message.assistant .msg-content strong { font-weight: 600; }
+    .message.assistant .msg-content img { max-width: 100%; border-radius: var(--r1); }
+
+    .code-copy-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 22px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--mid);
+      cursor: pointer;
+      opacity: 0;
+      transition: all var(--dur);
+    }
+    .code-copy-btn svg { width: 11px; height: 11px; }
+    pre:hover .code-copy-btn { opacity: 1; }
+    .code-copy-btn:hover { color: var(--orange); border-color: var(--orange); }
+    .code-copy-btn.copied { color: var(--success); border-color: var(--success); }
 
     .typing-cursor {
       display: inline-block;
@@ -2033,6 +2129,36 @@ HTML = """<!DOCTYPE html>
       dot.className = 'status-dot' + (state === 'active' ? ' active' : state === 'rec' ? ' rec' : '');
     }
 
+    // Configure marked for safe markdown rendering
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({ breaks: true, gfm: true });
+    }
+
+    function renderMarkdown(text) {
+      if (typeof marked !== 'undefined') {
+        return marked.parse(text);
+      }
+      return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    }
+
+    function addCodeCopyButtons(container) {
+      container.querySelectorAll('pre').forEach(pre => {
+        if (pre.querySelector('.code-copy-btn')) return;
+        const btn = document.createElement('span');
+        btn.className = 'code-copy-btn';
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        btn.addEventListener('click', () => {
+          const code = pre.querySelector('code');
+          navigator.clipboard.writeText(code ? code.textContent : pre.textContent).then(() => {
+            btn.classList.add('copied');
+            setTimeout(() => btn.classList.remove('copied'), 1200);
+          });
+        });
+        pre.style.position = 'relative';
+        pre.appendChild(btn);
+      });
+    }
+
     function appendMessage(role, content) {
       const container = document.getElementById('messages');
       const div = document.createElement('div');
@@ -2048,7 +2174,12 @@ HTML = """<!DOCTYPE html>
       extra += '<span class="msg-copy" title="Copy text"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>';
       div.innerHTML = '<div class="msg-avatar">' + avatar + '</div><div class="msg-body"><div class="msg-header"><span class="msg-name">' + name + '</span><span class="msg-time">' + now + '</span>' + extra + '</div><div class="msg-content"></div></div>';
       const contentDiv = div.querySelector('.msg-content');
-      contentDiv.textContent = content || '';
+      if (role === 'assistant' && content) {
+        contentDiv.innerHTML = renderMarkdown(content);
+        addCodeCopyButtons(contentDiv);
+      } else {
+        contentDiv.textContent = content || '';
+      }
       const playBtn = div.querySelector('.msg-play');
       if (playBtn) {
         playBtn.addEventListener('click', e => {
@@ -2251,7 +2382,11 @@ HTML = """<!DOCTYPE html>
                 if (currentAssistantEl) {
                   const c = currentAssistantEl.querySelector('.typing-cursor');
                   if (c) c.remove();
-                  asstText = currentAssistantEl.querySelector('.msg-content').textContent;
+                  const contentEl = currentAssistantEl.querySelector('.msg-content');
+                  asstText = contentEl.textContent;
+                  // Re-render as markdown after streaming completes
+                  contentEl.innerHTML = renderMarkdown(asstText);
+                  addCodeCopyButtons(contentEl);
                 }
                 setStatus('Ready', '');
                 log('Response complete \\u00b7 ' + sentencesPlayed + ' sentence(s)', 'ok');
