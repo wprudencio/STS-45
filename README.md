@@ -31,11 +31,19 @@ docker compose up -d
 | STT | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) (NVIDIA NeMo → ggml) | `:8081` |
 | LLM | [llama.cpp](https://github.com/ggerganov/llama.cpp) server | `:8080` |
 | TTS | [Supertonic 3](https://github.com/supertone-inc/supertonic) (ONNX Runtime) | — |
-| UI | Flask + vanilla JS | `:7777` |
+| UI | Flask + vanilla JS (`templates/`, `static/`) | `:7777` |
 
 ## Usage
 
-Hold mic or Space to talk, release to transcribe, Enter to send. Edit voice, language, and system prompt in the left panel.
+Click the mic button (or double-tap `Shift`) to talk; `Shift` once stops the
+mic, `Enter` sends. Edit voice, language, and system prompt from the **Settings**
+dialog and the per-conversation system-prompt strip.
+
+Extra features: stop/regenerate a response, edit & resend a previous user
+message, branch a conversation from any message, pin messages, export/import
+(Markdown or JSON), prompt templates (type `/`), live token & latency stats,
+and a keyboard-shortcut overlay (`?` or `⌘⇧O`). All conversation history is
+stored locally in your browser (IndexedDB).
 
 ## Realtime conversation mode
 
