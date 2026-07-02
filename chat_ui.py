@@ -18,8 +18,17 @@ import requests
 from flask import Flask, Response, request, render_template_string
 from supertonic import TTS
 
+try:
+    import realtime as _realtime
+except Exception as _rt_err:  # websockets missing -> core chat still works
+    _realtime = None
+    print(f"⚠️  Realtime module unavailable (voice mode disabled): {_rt_err}")
+
 LLAMA_API = "http://127.0.0.1:8080/v1/chat/completions"
 STT_API = "http://localhost:8080"
+
+# Realtime WebSocket port (set in main(); one above the HTTP port by default).
+RT_WS_PORT = 7778
 
 SYS_PROMPT = (
     "You are a friendly, helpful assistant. Respond in the same language as the user. "
@@ -1347,6 +1356,47 @@ HTML = """<!DOCTYPE html>
       .brand-name { display: none; }
       .input-area { padding: 8px 10px 6px; }
     }
+
+    /* --- Realtime conversation mode (orb + live transcript) --- */
+    .rt-view { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding: 24px 18px 18px; z-index: 5; background: var(--bg); }
+    .rt-view.hidden { display: none; }
+    .rt-stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; width: 100%; }
+    .rt-orb { width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center; position: relative; background: radial-gradient(circle at 50% 40%, var(--surface-hover), var(--surface)); border: 1px solid var(--border); transition: box-shadow .4s var(--ease), border-color .4s var(--ease); }
+    .rt-orb::after { content: ''; position: absolute; inset: -10px; border-radius: 50%; border: 1px solid var(--border); opacity: .5; }
+    .rt-orb-core { width: 46%; height: 46%; border-radius: 50%; background: var(--mid); transition: background .4s var(--ease), transform .12s linear; }
+    .rt-orb.listening { border-color: var(--orange); box-shadow: 0 0 0 6px rgba(234,88,12,.10), 0 0 60px 4px rgba(234,88,12,.30); }
+    .rt-orb.listening .rt-orb-core { background: var(--orange); animation: rt-pulse 1.6s ease-in-out infinite; }
+    .rt-orb.thinking { border-color: var(--soft); box-shadow: 0 0 0 6px rgba(251,146,60,.10), 0 0 60px 4px rgba(251,146,60,.28); }
+    .rt-orb.thinking .rt-orb-core { background: var(--soft); animation: rt-spin 1.1s linear infinite; }
+    .rt-orb.speaking { border-color: var(--success); box-shadow: 0 0 0 6px rgba(22,163,74,.12), 0 0 70px 6px rgba(22,163,74,.32); }
+    .rt-orb.speaking .rt-orb-core { background: var(--success); animation: rt-breathe 1s ease-in-out infinite; }
+    .rt-orb.connecting .rt-orb-core { background: var(--light); animation: rt-breathe 1.4s ease-in-out infinite; }
+    .rt-orb.idle .rt-orb-core { background: var(--mid); }
+    @keyframes rt-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.14); } }
+    @keyframes rt-breathe { 0%,100% { transform: scale(.92); opacity: .85; } 50% { transform: scale(1.08); opacity: 1; } }
+    @keyframes rt-spin { 0% { transform: scale(.9) rotate(0); } 100% { transform: scale(.9) rotate(360deg); } }
+    .rt-state { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--light); }
+    .rt-transcript { flex: 1 1 0; width: 100%; max-width: 680px; overflow-y: auto; padding: 10px 4px; display: flex; flex-direction: column; gap: 12px; }
+    .rt-transcript::-webkit-scrollbar { width: 6px; }
+    .rt-transcript::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .rt-line { font-size: 15px; line-height: 1.5; color: var(--charcoal); white-space: pre-wrap; word-break: break-word; }
+    .rt-line.user { color: var(--char2); }
+    .rt-line.assistant { color: var(--charcoal); }
+    .rt-line .rt-role { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--light); margin-bottom: 3px; }
+    .rt-line.user .rt-role { color: var(--orange); }
+    .rt-line.assistant .rt-role { color: var(--success); }
+    .rt-line.live::after { content: '▋'; color: var(--orange); animation: rt-blink 1s steps(2) infinite; }
+    @keyframes rt-blink { 50% { opacity: 0; } }
+    .rt-controls { display: flex; gap: 10px; margin-top: 14px; }
+    .rt-end-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--charcoal); font-family: var(--font); font-size: 14px; cursor: pointer; transition: all var(--dur) var(--ease); }
+    .rt-end-btn:hover { background: var(--surface-hover); border-color: var(--error); color: var(--error); }
+    .rt-end-btn svg { width: 16px; height: 16px; }
+    .rt-badge { position: fixed; right: 16px; bottom: 16px; z-index: 6; display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--char2); font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+    .rt-badge .rt-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); box-shadow: 0 0 8px 1px rgba(22,163,74,.6); }
+    .rt-badge.listening .rt-dot { background: var(--orange); box-shadow: 0 0 8px 1px rgba(234,88,12,.6); }
+    .rt-badge.thinking .rt-dot { background: var(--soft); }
+    .rt-badge.idle .rt-dot { background: var(--light); box-shadow: none; }
+    @media (max-width: 600px) { .rt-orb { width: 108px; height: 108px; } .rt-transcript { font-size: 14px; } }
   </style>
 </head>
 <body>
@@ -1370,6 +1420,14 @@ HTML = """<!DOCTYPE html>
       <span class="status-text" id="statusText">Ready</span>
     </div>
     <div class="topbar-right">
+      <button class="icon-btn" id="rtBtn" onclick="toggleRealtime()" title="Realtime conversation" aria-label="Realtime conversation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
       <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
         <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="4"/>
@@ -1412,6 +1470,19 @@ HTML = """<!DOCTYPE html>
     </aside>
 
     <main class="panel-center">
+      <div class="rt-view hidden" id="rtView">
+        <div class="rt-stage">
+          <div class="rt-orb idle" id="rtOrb"><span class="rt-orb-core"></span></div>
+          <div class="rt-state" id="rtState">Tap to start</div>
+        </div>
+        <div class="rt-transcript" id="rtTranscript"></div>
+        <div class="rt-controls">
+          <button class="rt-end-btn" id="rtEndBtn" onclick="toggleRealtime()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+            End conversation
+          </button>
+        </div>
+      </div>
       <div class="chat-header">
         <span class="chat-header-title" id="chatTitle">Voice Session</span>
         <span class="chat-header-meta" id="sessionMeta">SES &middot; 00:00</span>
@@ -2602,6 +2673,179 @@ HTML = """<!DOCTYPE html>
       }
     });
 
+    // --- Realtime conversation mode (local speech-to-speech over WebSocket) ---
+    const RT_WS_PORT = {{ ws_port }};
+    let rtWS = null, rtCtx = null, rtMicStream = null, rtScript = null, rtRunning = false;
+    let rtPlayCtx = null, rtTTSsr = 24000, rtPlaySources = [], rtPlayTime = 0;
+    let rtState = 'idle', rtAsstEl = null, rtAsstText = '';
+
+    function setRTState(s) {
+      rtState = s;
+      document.getElementById('rtOrb').className = 'rt-orb ' + s;
+      const labels = {idle:'Tap to start', connecting:'Connecting…', listening:'Listening', thinking:'Thinking', speaking:'Speaking'};
+      document.getElementById('rtState').textContent = labels[s] || s;
+    }
+
+    function rtSettings() {
+      return {
+        lang: document.getElementById('lang').value,
+        voice: document.getElementById('voice').value,
+        steps: parseInt(document.getElementById('steps').value),
+        speed: parseFloat(document.getElementById('speed').value),
+        max_tokens: parseInt(document.getElementById('maxTokens').value) || 512,
+        api_url: document.getElementById('apiUrl').value.trim(),
+        api_key: document.getElementById('apiKey').value.trim(),
+        sys_prompt: document.getElementById('sysPrompt').value,
+      };
+    }
+
+    function rtSendStart() {
+      if (!rtWS || rtWS.readyState !== 1) return;
+      rtWS.send(JSON.stringify(Object.assign({type:'start'}, rtSettings())));
+    }
+
+    function rtEscapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    function rtAppendUser(text) {
+      const t = document.getElementById('rtTranscript');
+      const el = document.createElement('div');
+      el.className = 'rt-line user';
+      el.innerHTML = '<span class="rt-role">You</span>' + rtEscapeHtml(text);
+      t.appendChild(el); t.scrollTop = t.scrollHeight;
+      rtAsstEl = null; rtAsstText = '';
+    }
+
+    function rtAppendAssistantDelta(tok) {
+      const t = document.getElementById('rtTranscript');
+      if (!rtAsstEl) {
+        rtAsstEl = document.createElement('div');
+        rtAsstEl.className = 'rt-line assistant live';
+        rtAsstEl.innerHTML = '<span class="rt-role">Assistant</span><span class="rt-text"></span>';
+        t.appendChild(rtAsstEl);
+        rtAsstText = '';
+      }
+      rtAsstText += tok;
+      rtAsstEl.querySelector('.rt-text').textContent = rtAsstText;
+      t.scrollTop = t.scrollHeight;
+    }
+
+    function rtFinalizeAssistant() {
+      if (rtAsstEl) { rtAsstEl.classList.remove('live'); rtAsstEl = null; rtAsstText = ''; }
+    }
+
+    function rtClearPlayback() {
+      rtPlaySources.forEach(s => { try { s.stop(); } catch(e){} });
+      rtPlaySources = [];
+      if (rtPlayCtx) rtPlayTime = rtPlayCtx.currentTime;
+    }
+
+    function onRTAudio(buf) {
+      if (!rtPlayCtx) return;
+      const i16 = new Int16Array(buf);
+      const f32 = new Float32Array(i16.length);
+      for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+      const ab = rtPlayCtx.createBuffer(1, f32.length, rtTTSsr);
+      ab.copyToChannel(f32, 0);
+      const src = rtPlayCtx.createBufferSource();
+      src.buffer = ab; src.connect(rtPlayCtx.destination);
+      const now = rtPlayCtx.currentTime;
+      if (rtPlayTime < now) rtPlayTime = now + 0.02;
+      src.start(rtPlayTime);
+      rtPlayTime += ab.duration;
+      rtPlaySources.push(src);
+      src.onended = () => { rtPlaySources = rtPlaySources.filter(s => s !== src); };
+    }
+
+    function onRTMsg(m) {
+      if (m.type === 'ready') { rtTTSsr = m.sampleRate || 24000; setRTState('listening'); }
+      else if (m.type === 'state') setRTState(m.state);
+      else if (m.type === 'transcript') {
+        if (m.role === 'user' && m.final) rtAppendUser(m.text);
+        else if (m.role === 'assistant') {
+          if (m.final) rtFinalizeAssistant();
+          else if (m.text) rtAppendAssistantDelta(m.text);
+        }
+      } else if (m.type === 'clear') rtClearPlayback();
+      else if (m.type === 'error') {
+        log('RT: ' + m.text, 'warn');
+        if (/loading|TTS/i.test(m.text)) { setRTState('connecting'); setTimeout(rtSendStart, 2500); }
+      }
+    }
+
+    async function startRealtime() {
+      if (rtRunning) return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        log('Mic unavailable (page must be HTTPS or localhost)', 'warn'); return;
+      }
+      setRTState('connecting');
+      document.getElementById('rtView').classList.remove('hidden');
+      document.querySelector('.input-area').classList.add('hidden');
+      document.getElementById('initOverlay').classList.add('hidden');
+      document.getElementById('messages').classList.add('hidden');
+      const url = 'ws://' + location.hostname + ':' + RT_WS_PORT + '/ws';
+      try { rtWS = new WebSocket(url); }
+      catch (e) { log('WS error: ' + e.message, 'warn'); stopRealtimeUI('Tap to start'); return; }
+      rtWS.binaryType = 'arraybuffer';
+      rtWS.onopen = () => { rtSendStart(); log('Realtime connected', 'hl'); };
+      rtWS.onmessage = (e) => {
+        if (e.data instanceof ArrayBuffer) onRTAudio(e.data);
+        else { try { onRTMsg(JSON.parse(e.data)); } catch(_){} }
+      };
+      rtWS.onclose = () => { if (rtRunning) { log('Realtime disconnected', 'warn'); stopRealtimeUI('Disconnected'); } };
+      rtWS.onerror = () => { log('Realtime connection error', 'warn'); };
+      try {
+        rtMicStream = await navigator.mediaDevices.getUserMedia({
+          audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+        });
+      } catch (e) { log('Mic error: ' + e.message, 'warn'); stopRealtimeUI('Tap to start'); return; }
+      rtCtx = new AudioContext({ sampleRate: 16000 });
+      const src = rtCtx.createMediaStreamSource(rtMicStream);
+      rtScript = rtCtx.createScriptProcessor(2048, 1, 1);
+      rtScript.onaudioprocess = (e) => {
+        if (!rtWS || rtWS.readyState !== 1) return;
+        const d = e.inputBuffer.getChannelData(0);
+        const buf = new Int16Array(d.length);
+        for (let i = 0; i < d.length; i++) { let s = Math.max(-1, Math.min(1, d[i])); buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; }
+        rtWS.send(buf.buffer);
+      };
+      src.connect(rtScript); rtScript.connect(rtCtx.destination);
+      rtPlayCtx = new AudioContext();
+      rtPlayTime = rtPlayCtx.currentTime;
+      rtRunning = true;
+      document.getElementById('rtBtn').classList.add('active');
+      log('Realtime conversation started — just talk (use headphones to avoid echo).', 'hl');
+    }
+
+    function stopRealtimeUI(msg) {
+      rtRunning = false;
+      if (rtScript) { try { rtScript.disconnect(); } catch(e){} rtScript = null; }
+      if (rtMicStream) { rtMicStream.getTracks().forEach(t => t.stop()); rtMicStream = null; }
+      if (rtCtx) { try { rtCtx.close(); } catch(e){} rtCtx = null; }
+      rtClearPlayback();
+      if (rtPlayCtx) { try { rtPlayCtx.close(); } catch(e){} rtPlayCtx = null; }
+      if (rtWS) { try { rtWS.close(); } catch(e){} rtWS = null; }
+      document.getElementById('rtView').classList.add('hidden');
+      document.querySelector('.input-area').classList.remove('hidden');
+      document.getElementById('rtBtn').classList.remove('active');
+      setRTState('idle');
+      document.getElementById('rtState').textContent = msg || 'Tap to start';
+      document.getElementById('rtTranscript').innerHTML = '';
+      rtAsstEl = null; rtAsstText = '';
+    }
+
+    async function stopRealtime() {
+      if (rtWS && rtWS.readyState === 1) { try { rtWS.send(JSON.stringify({type:'stop'})); } catch(e){} }
+      stopRealtimeUI('Ended');
+      setStatus('Ready', '');
+    }
+
+    window.toggleRealtime = function() {
+      if (rtRunning) stopRealtime();
+      else { setStatus('Realtime', 'active'); startRealtime(); }
+    };
+
     initConversationHistory().then(() => {
       setStatus('Ready', '');
       log('Supertonic voice chat ready \u2014 STT via parakeet.cpp.', 'ok');
@@ -2619,6 +2863,7 @@ def index():
         HTML,
         default_api_url=config["api_url"],
         default_stt_api_url=config["stt_api_url"],
+        ws_port=RT_WS_PORT,
     )
 
 
@@ -2633,11 +2878,12 @@ def _load_tts_background():
 
 
 def main():
-    global tts, style, config
+    global tts, style, config, RT_WS_PORT
 
     parser = argparse.ArgumentParser(description="Supertonic Voice Chat Web UI")
     parser.add_argument("--host", default="127.0.0.1", help="Host")
     parser.add_argument("--port", type=int, default=7777, help="Port")
+    parser.add_argument("--ws-port", type=int, default=0, help="Realtime WebSocket port (default: HTTP port + 1)")
     parser.add_argument("--api", default=LLAMA_API, help="LLM API URL")
     parser.add_argument("--stt-api", default=STT_API, help="Parakeet STT server URL")
     parser.add_argument("--model", default="default", help="Model name")
@@ -2657,14 +2903,26 @@ def main():
         "model": args.model,
     })
 
+    RT_WS_PORT = args.ws_port or (args.port + 1)
+
     print("🚀 Loading Supertonic TTS in background...")
     t = threading.Thread(target=_load_tts_background, daemon=True)
     t.start()
+
+    if _realtime is not None:
+        try:
+            import sys
+            _realtime.start(args.host, RT_WS_PORT, sys.modules[__name__])
+        except Exception as e:
+            print(f"⚠️  Realtime server failed to start: {e}")
+    else:
+        print("⚠️  Realtime mode unavailable (websockets not installed).")
 
     print(f"""
 ╔══════════════════════════════════════════╗
 ║   🎤 Supertonic Voice Chat              ║
 ║   Open: http://{args.host}:{args.port}          ║
+║   WS:   ws://{args.host}:{RT_WS_PORT}/ws           ║
 ║   LLM:  {args.api}        ║
 ║   STT:  {args.stt_api}           ║
 ║   Voice: {args.voice}  |  Lang: {args.lang}      ║

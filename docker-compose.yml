@@ -4,6 +4,7 @@ services:
     container_name: supertonic-chat
     ports:
       - "7777:7777"
+      - "7778:7778"
     volumes:
       # Persist HuggingFace model cache (avoids re-downloading ~260MB on rebuild)
       - hf_cache:/root/.cache/huggingface
