@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Supertonic — Realtime Voice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#0a0b10;
+  --bg-elev:#13151c;
+  --bg-elev2:#1b1e29;
+  --border:rgba(255,255,255,.08);
+  --border-strong:rgba(255,255,255,.14);
+  --text:#f5f6fa;
+  --text-dim:rgba(245,246,250,.62);
+  --text-faint:rgba(245,246,250,.38);
+  --orange:#ea580c;
+  --orange-soft:rgba(234,88,12,.18);
+  --amber:#f59e0b;
+  --cyan:#22d3ee;
+  --violet:#8b7dff;
+  --success:#34d399;
+  --error:#ff6a75;
+  --radius-sm:8px;
+  --radius-md:14px;
+  --radius-lg:22px;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --mono:'Geist Mono','JetBrains Mono',ui-monospace,monospace;
+  --dur:200ms;
+  --ease:cubic-bezier(.25,0,0,1);
+}
+
+html,body{height:100%;overflow:hidden}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--font);
+  -webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;
+}
+
+/* ── Topbar ───────────────────────────────────── */
+.topbar{
+  height:48px;flex-shrink:0;
+  background:var(--bg);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 20px;z-index:50;
+}
+.brand{
+  display:flex;align-items:center;gap:10px;
+}
+.brand-mark{
+  display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;
+  gap:2px;width:18px;height:18px;
+}
+.brand-mark span{background:var(--orange);border-radius:2px}
+.brand-mark span:nth-child(2),.brand-mark span:nth-child(3){background:var(--border-strong)}
+.brand-name{font-size:13px;font-weight:600;letter-spacing:-.02em}
+.topbar-actions{display:flex;align-items:center;gap:4px}
+
+.icon-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;border-radius:var(--radius-sm);
+  background:var(--bg-elev);border:1px solid var(--border);
+  color:var(--text-dim);cursor:pointer;
+  transition:all var(--dur);
+}
+.icon-btn:hover{color:var(--text);border-color:var(--border-strong)}
+.icon-btn.active{color:var(--orange)}
+.icon-btn svg{width:16px;height:16px}
+
+.tag{
+  font-family:var(--mono);font-size:9px;font-weight:500;
+  color:var(--text-faint);background:var(--bg-elev);
+  border:1px solid var(--border);border-radius:999px;
+  padding:2px 8px;letter-spacing:.06em;text-transform:uppercase;
+}
+.tag.live{color:var(--orange);border-color:var(--orange-soft);background:var(--orange-soft)}
+
+/* ── Stage (orb center) ──────────────────────── */
+.stage{
+  flex:1;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:24px;padding:40px 20px;overflow:hidden;
+  min-height:0;
+}
+
+.orb-wrap{
+  position:relative;
+  display:flex;align-items:center;justify-content:center;
+}
+.orb{
+  position:relative;
+  width:160px;height:160px;
+  border-radius:50%;
+  cursor:pointer;
+  background:
+    radial-gradient(circle at 38% 35%,rgba(255,255,255,.12) 0%,transparent 50%),
+    radial-gradient(circle at center,var(--bg-elev) 0%,var(--bg) 100%);
+  border:1.5px solid var(--border);
+  transition:
+    box-shadow .6s ease,
+    border-color .4s ease,
+    transform .12s ease-out;
+  outline:none;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+.orb::after{
+  content:'';position:absolute;inset:-2px;border-radius:50%;
+  pointer-events:none;
+  transition:box-shadow .6s ease;
+}
+.orb:focus-visible{
+  outline:2px solid var(--text-dim);
+  outline-offset:6px;
+}
+
+/* Orb ring visual feedback */
+.orb-ring{
+  position:absolute;inset:-4px;border-radius:50%;
+  pointer-events:none;
+  border:1.5px solid transparent;
+  transition:border-color .4s ease,box-shadow .4s ease;
+}
+
+/* ── Orb states ──────────────────────────────── */
+.orb.state-idle{}
+.orb.state-idle .orb-ring{border-color:var(--border);box-shadow:none}
+.orb.state-connecting .orb-ring{
+  border-color:var(--amber);
+  box-shadow:0 0 28px var(--amber),0 0 60px rgba(245,158,11,.18);
+  animation:throb 1.3s ease-in-out infinite;
+}
+.orb.state-listening .orb-ring{
+  border-color:var(--cyan);
+  box-shadow:0 0 36px var(--cyan),0 0 80px rgba(34,211,238,.2);
+}
+.orb.state-processing .orb-ring{
+  border-color:var(--amber);
+  box-shadow:0 0 30px var(--amber),0 0 64px rgba(245,158,11,.16);
+  animation:throb .8s ease-in-out infinite;
+}
+.orb.state-speaking .orb-ring{
+  border-color:var(--orange);
+  box-shadow:0 0 36px var(--orange),0 0 80px rgba(234,88,12,.22);
+}
+.orb.state-error .orb-ring{
+  border-color:var(--error);
+  box-shadow:0 0 28px var(--error),0 0 56px rgba(255,106,117,.18);
+  animation:throb 1.8s ease-in-out infinite;
+}
+
+@keyframes throb{
+  0%,100%{opacity:1}
+  50%{opacity:.45}
+}
+
+/* ── Orb inner glow pulse ───────────────────── */
+.orb-glow{
+  position:absolute;inset:12px;border-radius:50%;
+  pointer-events:none;
+  background:radial-gradient(circle,rgba(234,88,12,.06) 0%,transparent 70%);
+  transition:background .5s ease,transform .1s ease-out;
+  transform:scale(1);
+}
+.state-listening .orb-glow{background:radial-gradient(circle,rgba(34,211,238,.1) 0%,transparent 70%)}
+.state-speaking .orb-glow{background:radial-gradient(circle,rgba(234,88,12,.1) 0%,transparent 70%)}
+.state-processing .orb-glow{background:radial-gradient(circle,rgba(245,158,11,.08) 0%,transparent 70%)}
+
+/* ── Caption ─────────────────────────────────── */
+.caption{
+  font-family:var(--mono);
+  font-size:11px;font-weight:500;
+  color:var(--text-faint);
+  letter-spacing:.08em;text-transform:uppercase;
+  text-align:center;
+  transition:color .3s;
+}
+.caption.error{color:var(--error)}
+.caption.active{color:var(--orange)}
+
+/* ── Controls ────────────────────────────────── */
+.controls{
+  display:flex;align-items:center;gap:12px;
+  transition:opacity .3s,transform .3s;
+}
+.controls.hidden{opacity:0;pointer-events:none;transform:translateY(4px)}
+
+.ctrl-btn{
+  width:44px;height:44px;border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:var(--bg-elev);border:1px solid var(--border);
+  color:var(--text-dim);cursor:pointer;
+  transition:all var(--dur);
+  touch-action:manipulation;
+}
+.ctrl-btn:hover{color:var(--text);border-color:var(--border-strong)}
+.ctrl-btn svg{width:18px;height:18px}
+.ctrl-btn.muted{color:var(--error);border-color:var(--error)}
+.ctrl-btn.stop-btn{}
+.ctrl-btn.stop-btn:hover{color:var(--error);border-color:var(--error)}
+
+/* ── Transcript panel ────────────────────────── */
+.transcript-panel{
+  position:fixed;right:0;top:48px;bottom:0;
+  width:380px;max-width:90vw;
+  background:var(--bg-elev);
+  border-left:1px solid var(--border);
+  display:flex;flex-direction:column;
+  transform:translateX(100%);
+  transition:transform .3s var(--ease);
+  z-index:40;
+}
+.transcript-panel.open{transform:translateX(0)}
+
+.transcript-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.transcript-title{
+  font-size:13px;font-weight:600;
+}
+.transcript-close{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;border-radius:6px;
+  background:none;border:1px solid var(--border);
+  color:var(--text-dim);cursor:pointer;
+}
+.transcript-close:hover{color:var(--text)}
+.transcript-body{
+  flex:1;overflow-y:auto;padding:14px 18px;
+  display:flex;flex-direction:column;gap:14px;
+}
+.transcript-empty{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  color:var(--text-faint);font-family:var(--mono);
+  font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+}
+
+.msg{display:flex;flex-direction:column;gap:2px;animation:msgIn .2s var(--ease)}
+@keyframes msgIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+.msg-role{
+  font-family:var(--mono);font-size:9px;font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;
+}
+.msg-role.user{color:var(--cyan)}
+.msg-role.assistant{color:var(--orange)}
+
+.msg-text{
+  font-size:13.5px;line-height:1.6;
+  color:var(--text-dim);
+}
+.msg.user .msg-text{color:var(--text)}
+
+/* ── Settings modal ──────────────────────────── */
+.modal-overlay{
+  position:fixed;inset:0;z-index:200;
+  background:rgba(0,0,0,.55);backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;
+}
+.modal-overlay.hidden{display:none}
+
+.modal{
+  background:var(--bg-elev);
+  border:1px solid var(--border);
+  border-radius:var(--radius-md);
+  width:420px;max-width:100%;max-height:90vh;overflow-y:auto;
+  box-shadow:0 20px 60px rgba(0,0,0,.45);
+}
+.modal-header{
+  padding:16px 20px;border-bottom:1px solid var(--border);
+  display:flex;justify-content:space-between;align-items:center;
+}
+.modal-title{font-size:14px;font-weight:600}
+.modal-close{
+  background:none;border:none;color:var(--text-dim);cursor:pointer;
+  padding:4px;border-radius:4px;display:inline-flex;
+}
+.modal-close:hover{color:var(--text)}
+.modal-close svg{width:16px;height:16px}
+
+.modal-body{
+  padding:16px 20px;display:flex;flex-direction:column;gap:14px;
+}
+.modal-footer{
+  padding:14px 20px;border-top:1px solid var(--border);
+  display:flex;justify-content:flex-end;gap:8px;
+}
+
+.field-label{
+  font-size:10px;font-weight:600;color:var(--text-faint);
+  letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px;
+}
+select,.field-input{
+  width:100%;padding:8px 28px 8px 11px;
+  background:var(--bg-elev2);border:1px solid var(--border);
+  border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);
+  font-size:12px;outline:none;appearance:none;-webkit-appearance:none;
+  transition:border-color var(--dur);
+}
+select:focus,.field-input:focus{border-color:var(--orange)}
+.select-wrap{position:relative}
+.select-wrap::after{
+  content:'';position:absolute;right:11px;top:50%;
+  width:5px;height:5px;border-right:1.5px solid var(--text-dim);
+  border-bottom:1.5px solid var(--text-dim);
+  transform:translateY(-70%) rotate(45deg);pointer-events:none;
+}
+.field-input{padding:8px 11px;font-family:var(--mono);font-size:11px}
+
+.slider-row{display:flex;flex-direction:column;gap:5px}
+.slider-label{display:flex;justify-content:space-between}
+.slider-name{font-size:11px;color:var(--text-dim)}
+.slider-val{font-family:var(--mono);font-size:11px;color:var(--text);font-weight:500}
+
+input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:3px;
+  background:var(--border);border-radius:2px;outline:none;cursor:pointer;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:14px;height:14px;
+  background:var(--orange);border-radius:50%;
+  border:2px solid var(--bg-elev);cursor:pointer;
+}
+
+.btn{
+  padding:8px 16px;font-size:12px;font-weight:500;
+  border-radius:var(--radius-sm);cursor:pointer;border:1px solid transparent;
+  transition:all var(--dur);font-family:var(--font);
+}
+.btn-primary{background:var(--orange);color:#fff;border-color:var(--orange)}
+.btn-primary:hover{background:#c2410c;border-color:#c2410c}
+.btn-ghost{background:transparent;color:var(--text-dim);border-color:var(--border)}
+.btn-ghost:hover{color:var(--text);border-color:var(--border-strong)}
+
+/* ── Responsive ──────────────────────────────── */
+@media(max-width:700px){
+  .transcript-panel{width:100%;max-width:100vw}
+  .orb{width:130px;height:130px}
+}
+@media(max-width:440px){
+  .orb{width:110px;height:110px}
+  .brand-name{display:none}
+}
+
+/* ── Scrollbar ───────────────────────────────── */
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:3px}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark"><span></span><span></span><span></span><span></span></div>
+    <span class="brand-name">Supertonic &middot; Realtime Voice</span>
+  </div>
+  <div class="topbar-actions">
+    <span class="tag" id="statusTag">IDLE</span>
+    <button class="icon-btn" id="transcriptBtn" onclick="toggleTranscript()" title="Transcript" aria-label="Open transcript">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+    </button>
+    <button class="icon-btn" id="settingsBtn" onclick="openSettings()" title="Settings" aria-label="Open settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<main class="stage">
+  <div class="orb-wrap">
+    <div class="orb state-idle" id="orb" role="button" tabindex="0" aria-label="Start voice conversation">
+      <div class="orb-ring"></div>
+      <div class="orb-glow"></div>
+    </div>
+  </div>
+  <p class="caption" id="caption">Tap to start</p>
+  <div class="controls hidden" id="controls">
+    <button class="ctrl-btn mic-btn" id="micBtn" onclick="toggleMute()" title="Mute" aria-label="Mute microphone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+      </svg>
+    </button>
+    <button class="ctrl-btn stop-btn" id="stopBtn" onclick="stopConversation()" title="End" aria-label="End conversation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="6" y="6" width="12" height="12" rx="2"/>
+      </svg>
+    </button>
+  </div>
+</main>
+
+<aside class="transcript-panel" id="transcriptPanel">
+  <div class="transcript-header">
+    <span class="transcript-title">Transcript</span>
+    <button class="transcript-close" onclick="toggleTranscript()" aria-label="Close transcript">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="transcript-body" id="transcriptBody">
+    <div class="transcript-empty" id="transcriptEmpty">Nothing yet</div>
+  </div>
+</aside>
+
+<div class="modal-overlay hidden" id="settingsModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Settings</span>
+      <button class="modal-close" onclick="closeSettings()" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div>
+        <div class="field-label">Voice</div>
+        <div class="select-wrap"><select id="voiceSelect">
+          <option value="M1">M1 &middot; Male deep</option>
+          <option value="M2">M2 &middot; Male mid</option>
+          <option value="M3">M3 &middot; Male bright</option>
+          <option value="M4">M4 &middot; Male warm</option>
+          <option value="M5">M5 &middot; Male neutral</option>
+          <option value="F1">F1 &middot; Female deep</option>
+          <option value="F2">F2 &middot; Female mid</option>
+          <option value="F3">F3 &middot; Female bright</option>
+          <option value="F4">F4 &middot; Female warm</option>
+          <option value="F5">F5 &middot; Female neutral</option>
+        </select></div>
+      </div>
+      <div>
+        <div class="field-label">Language</div>
+        <div class="select-wrap"><select id="langSelect">
+          <option value="en">English</option>
+          <option value="pt">Portuguese</option>
+          <option value="es">Spanish</option>
+          <option value="fr">French</option>
+          <option value="de">German</option>
+          <option value="ja">Japanese</option>
+          <option value="ko">Korean</option>
+        </select></div>
+      </div>
+      <div>
+        <div class="slider-row">
+          <div class="slider-label">
+            <span class="slider-name">TTS Steps</span>
+            <span class="slider-val" id="stepsVal">5</span>
+          </div>
+          <input type="range" id="stepsRange" min="2" max="12" step="1" value="5" oninput="document.getElementById('stepsVal').textContent=this.value">
+        </div>
+      </div>
+      <div>
+        <div class="slider-row">
+          <div class="slider-label">
+            <span class="slider-name">Speed</span>
+            <span class="slider-val" id="speedVal">1.15</span>
+          </div>
+          <input type="range" id="speedRange" min="0.7" max="2.0" step="0.05" value="1.15" oninput="document.getElementById('speedVal').textContent=parseFloat(this.value).toFixed(2)">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── DOM refs ─────────────────────────────────────────────────────────────
+const orb = document.getElementById('orb');
+const caption = document.getElementById('caption');
+const controls = document.getElementById('controls');
+const statusTag = document.getElementById('statusTag');
+const transcriptBody = document.getElementById('transcriptBody');
+const transcriptEmpty = document.getElementById('transcriptEmpty');
+const transcriptPanel = document.getElementById('transcriptPanel');
+const transcriptBtn = document.getElementById('transcriptBtn');
+const micBtn = document.getElementById('micBtn');
+const settingsBtn = document.getElementById('settingsBtn');
+
+// ── State ────────────────────────────────────────────────────────────────
+const STATES = ['idle','connecting','listening','processing','speaking','error'];
+let currentState = 'idle';
+let ws = null;
+let audioCtx = null;
+let micStream = null;
+let workletNode = null;
+let micMuted = false;
+let audioQueue = null;
+let nextPlayTime = 0;
+let reconnectTimer = 0;
+let manualStop = false;
+
+// Settings
+let settings = {
+  voice: localStorage.getItem('s2_voice') || 'M1',
+  lang: localStorage.getItem('s2_lang') || 'en',
+  steps: Number(localStorage.getItem('s2_steps') || 5),
+  speed: Number(localStorage.getItem('s2_speed') || 1.15),
+};
+
+// ── Audio queue (plays WAV chunks in order) ─────────────────────────────
+class AudioQueue {
+  constructor(ctx) { this.ctx = ctx; this.chunks = []; this.playing = false; this.nextTime = 0; }
+  async add(b64) {
+    const buf = await this._decode(b64);
+    this.chunks.push(buf);
+    if (!this.playing) this._playNext();
+  }
+  _playNext() {
+    if (!this.chunks.length) { this.playing = false; return; }
+    this.playing = true;
+    const buf = this.chunks.shift();
+    const src = this.ctx.createBufferSource();
+    const gain = this.ctx.createGain();
+    gain.gain.value = 1.0;
+    src.buffer = buf;
+    src.connect(gain).connect(this.ctx.destination);
+    const t = Math.max(this.ctx.currentTime, this.nextTime);
+    src.start(t);
+    this.nextTime = t + buf.duration;
+    src.onended = () => this._playNext();
+  }
+  async _decode(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return await this.ctx.decodeAudioData(bytes.buffer.slice(0));
+  }
+  reset() {
+    this.chunks.length = 0;
+    this.playing = false;
+    this.nextTime = this.ctx.currentTime;
+  }
+}
+
+// ── State management ─────────────────────────────────────────────────────
+function setState(s) {
+  orb.classList.remove(...STATES.map(x => 'state-' + x));
+  orb.classList.add('state-' + s);
+  currentState = s;
+
+  const tags = { idle:'IDLE', connecting:'CONNECTING', listening:'LISTENING', processing:'THINKING', speaking:'SPEAKING', error:'ERROR' };
+  statusTag.textContent = tags[s] || s;
+  statusTag.classList.toggle('live', ['listening','processing','speaking','connecting'].includes(s));
+
+  const caps = { idle:'Tap to start', connecting:'Connecting…', listening:'Listening', processing:'Thinking…', speaking:'Speaking', error:'Tap to retry' };
+  caption.textContent = caps[s] || '';
+  caption.className = 'caption' + (s === 'error' ? ' error' : '') + (['listening','processing','speaking'].includes(s) ? ' active' : '');
+
+  const live = ['connecting','listening','processing','speaking'].includes(s);
+  controls.classList.toggle('hidden', !live);
+  transcriptBtn.classList.toggle('active', live);
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────
+function connect() {
+  if (ws && ws.readyState === WebSocket.OPEN) return;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = `${proto}//${location.host}/v1/realtime`;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    setState('idle');
+    // Send current settings
+    ws.send(JSON.stringify({ type: 'session.update', voice: settings.voice, lang: settings.lang, steps: settings.steps, speed: settings.speed }));
+  };
+
+  ws.onmessage = (ev) => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    ws = null;
+    if (['listening','processing','speaking','connecting'].includes(currentState)) {
+      setState('idle');
+    }
+    if (!manualStop && audioCtx && audioCtx.state !== 'closed') {
+      reconnectTimer = setTimeout(connect, 2000);
+    }
+  };
+
+  ws.onerror = () => {};
+}
+
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'status':
+      setState(msg.state);
+      break;
+    case 'transcript':
+      addTranscript(msg.role, msg.text);
+      break;
+    case 'audio.chunk':
+      if (audioQueue) audioQueue.add(msg.data);
+      break;
+    case 'audio.done':
+      break;
+    case 'audio.level':
+      updateOrbLevel(msg.rms);
+      break;
+    case 'error':
+      caption.textContent = msg.message;
+      caption.className = 'caption error';
+      break;
+    case 'cleared':
+      transcriptBody.innerHTML = '';
+      transcriptEmpty.style.display = 'block';
+      break;
+    case 'pong':
+      break;
+  }
+}
+
+let orbLevelTimeout = 0;
+function updateOrbLevel(rms) {
+  const level = Math.min(1, rms * 40);
+  orb.style.transform = `scale(${1 + level * 0.08})`;
+  clearTimeout(orbLevelTimeout);
+  orbLevelTimeout = setTimeout(() => { orb.style.transform = 'scale(1)'; }, 150);
+}
+
+// ── Transcript ────────────────────────────────────────────────────────────
+function addTranscript(role, text) {
+  transcriptEmpty.style.display = 'none';
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.innerHTML = `<span class="msg-role ${role}">${role.toUpperCase()}</span><span class="msg-text">${escapeHtml(text)}</span>`;
+  transcriptBody.appendChild(div);
+  transcriptBody.scrollTop = transcriptBody.scrollHeight;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function toggleTranscript() {
+  transcriptPanel.classList.toggle('open');
+}
+
+// ── Microphone capture ────────────────────────────────────────────────────
+async function startMic() {
+  if (micStream) return;
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  });
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+  }
+  audioQueue = new AudioQueue(audioCtx);
+
+  const source = audioCtx.createMediaStreamSource(micStream);
+
+  // Inline AudioWorklet via Blob URL
+  const code = `
+    class CaptureProcessor extends AudioWorkletProcessor {
+      process(inputs) {
+        const input = inputs[0];
+        if (input && input.length && input[0] && input[0].length) {
+          const buf = new Float32Array(input[0].length);
+          buf.set(input[0]);
+          this.port.postMessage(buf, [buf.buffer]);
+        }
+        return true;
+      }
+    }
+    registerProcessor('capture', CaptureProcessor);
+  `;
+  const blob = new Blob([code], { type: 'application/javascript' });
+  const url = URL.createObjectURL(blob);
+  await audioCtx.audioWorklet.addModule(url);
+  URL.revokeObjectURL(url);
+
+  workletNode = new AudioWorkletNode(audioCtx, 'capture');
+  workletNode.port.onmessage = (ev) => {
+    if (micMuted || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const f32 = ev.data;
+    const i16 = new Int16Array(f32.length);
+    for (let i = 0; i < f32.length; i++) {
+      i16[i] = Math.max(-32768, Math.min(32767, Math.round(f32[i] * 32767)));
+    }
+    const b64 = bufToBase64(new Uint8Array(i16.buffer));
+    ws.send(JSON.stringify({ type: 'audio', data: b64 }));
+  };
+
+  source.connect(workletNode);
+}
+
+function bufToBase64(arr) {
+  let bin = '';
+  const len = arr.length;
+  for (let i = 0; i < len; i++) bin += String.fromCharCode(arr[i]);
+  return window.btoa(bin);
+}
+
+function stopMic() {
+  if (workletNode) { workletNode.disconnect(); workletNode = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (audioQueue) { audioQueue.reset(); audioQueue = null; }
+}
+
+function toggleMute() {
+  micMuted = !micMuted;
+  micBtn.classList.toggle('muted', micMuted);
+  micBtn.title = micMuted ? 'Unmute' : 'Mute';
+  micBtn.setAttribute('aria-label', micMuted ? 'Unmute microphone' : 'Mute microphone');
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'session.update', muted: micMuted }));
+  }
+}
+
+// ── Conversation lifecycle ────────────────────────────────────────────────
+async function startConversation() {
+  if (['connecting','listening','processing','speaking'].includes(currentState)) return;
+  manualStop = false;
+  setState('connecting');
+  try {
+    if (!audioCtx || audioCtx.state === 'closed') {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+    }
+    await startMic();
+    connect();
+    // Rely on ws.onopen to set idle, then listening will fire when VAD triggers
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('Permission') || msg.includes('denied') || msg.includes('NotAllowed')) {
+      caption.textContent = 'Mic access denied';
+    } else {
+      caption.textContent = msg.slice(0, 80);
+    }
+    caption.className = 'caption error';
+    setState('error');
+  }
+}
+
+async function stopConversation() {
+  manualStop = true;
+  clearTimeout(reconnectTimer);
+  if (ws) {
+    try { ws.send(JSON.stringify({ type: 'stop' })); } catch {}
+    ws.close();
+    ws = null;
+  }
+  stopMic();
+  if (audioCtx && audioCtx.state !== 'closed') {
+    await audioCtx.close().catch(() => {});
+    audioCtx = null;
+  }
+  setState('idle');
+  orb.style.transform = 'scale(1)';
+  manualStop = false;
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('voiceSelect').value = settings.voice;
+  document.getElementById('langSelect').value = settings.lang;
+  document.getElementById('stepsRange').value = settings.steps;
+  document.getElementById('stepsVal').textContent = settings.steps;
+  document.getElementById('speedRange').value = settings.speed;
+  document.getElementById('speedVal').textContent = settings.speed.toFixed(2);
+  document.getElementById('settingsModal').classList.remove('hidden');
+}
+
+function closeSettings() {
+  document.getElementById('settingsModal').classList.add('hidden');
+}
+
+function saveSettings() {
+  settings.voice = document.getElementById('voiceSelect').value;
+  settings.lang = document.getElementById('langSelect').value;
+  settings.steps = Number(document.getElementById('stepsRange').value);
+  settings.speed = Number(document.getElementById('speedRange').value);
+
+  localStorage.setItem('s2_voice', settings.voice);
+  localStorage.setItem('s2_lang', settings.lang);
+  localStorage.setItem('s2_steps', settings.steps);
+  localStorage.setItem('s2_speed', settings.speed);
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'session.update', voice: settings.voice, lang: settings.lang, steps: settings.steps, speed: settings.speed }));
+  }
+  closeSettings();
+}
+
+// ── Event listeners ───────────────────────────────────────────────────────
+orb.addEventListener('click', () => {
+  if (['connecting','listening','processing','speaking'].includes(currentState)) return;
+  if (currentState === 'error') stopConversation().then(() => startConversation());
+  else startConversation();
+});
+
+orb.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    orb.click();
+  }
+});
+
+document.getElementById('settingsModal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeSettings();
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && transcriptPanel.classList.contains('open')) {
+    transcriptPanel.classList.remove('open');
+  }
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  stopMic();
+  if (ws) { ws.close(); ws = null; }
+  if (audioCtx && audioCtx.state !== 'closed') audioCtx.close().catch(() => {});
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+console.log('%c%s %cv%s',
+  'color:#ea580c;font-weight:bold;', 'Supertonic Realtime Voice',
+  'color:#888;', '0.1.0');
+</script>
+</body>
+</html>

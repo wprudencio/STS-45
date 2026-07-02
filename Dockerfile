@@ -12,7 +12,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # App code
+COPY realtime_server.py .
 COPY chat_ui.py .
+COPY templates/ ./templates/
 
 # HuggingFace cache volume for model persistence
 VOLUME ["/root/.cache/huggingface"]
@@ -21,4 +23,4 @@ EXPOSE 7777
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python3", "chat_ui.py", "--host", "0.0.0.0", "--port", "7777"]
+CMD ["python3", "realtime_server.py", "--host", "0.0.0.0", "--port", "7777"]

@@ -5,12 +5,13 @@ services:
     ports:
       - "7777:7777"
     volumes:
-      # Persist HuggingFace model cache (avoids re-downloading ~260MB on rebuild)
       - hf_cache:/root/.cache/huggingface
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
-    command: python3 chat_ui.py --host 0.0.0.0 --port 7777 --stt-api http://parakeet:8080 --api http://host.docker.internal:8080/v1/chat/completions
+    # Use realtime_server.py for orb-based realtime voice (WebSocket pipeline).
+    # Swap to chat_ui.py for the classic PTT + SSE text-chat UI.
+    command: python3 realtime_server.py --host 0.0.0.0 --port 7777 --stt-api http://parakeet:8080 --api http://host.docker.internal:8080/v1/chat/completions
     depends_on:
       - parakeet
 
