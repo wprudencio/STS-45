@@ -45,6 +45,28 @@ function log(text, type) {
 }
 window.log = log;
 
+// ---------- Toast banner ----------
+let toastTimer = null;
+let sttFailCount = 0;
+function showToast(msg, type) {
+  const old = document.querySelector('.toast');
+  if (old) old.remove();
+  const t = document.createElement('div');
+  t.className = 'toast' + (type ? ' ' + type : '');
+  const icon = type === 'error'
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+    : '';
+  t.innerHTML = icon + '<span>' + escapeHtml(msg) + '</span>';
+  const close = document.createElement('button');
+  close.className = 'toast-close'; close.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  close.onclick = () => t.remove();
+  t.appendChild(close);
+  document.body.appendChild(t);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.classList.add('hide'); setTimeout(() => t.remove(), 200); }, 6000);
+}
+window.showToast = showToast;
+
 // ---------- Settings ----------
 function loadSettings() {
   const g = (k, d) => localStorage.getItem(k) || d;
@@ -923,9 +945,24 @@ async function sttTranscribe(samples) {
     fd.append('stt_api', document.getElementById('sttApiUrl').value.trim());
     const resp = await fetch('/api/stt', { method: 'POST', body: fd });
     const data = await resp.json();
-    if (data.error) { log('STT error: ' + data.error, 'warn'); return ''; }
+    if (data.error) {
+      log('STT error: ' + data.error, 'warn');
+      sttFailCount++;
+      if (sttFailCount === 1) {
+        showToast('Speech recognition failed: ' + data.error + ' — check STT server URL in Settings', 'error');
+      }
+      return '';
+    }
+    sttFailCount = 0;
     return (data.text || '').replace(/^\s+|\s+$/g, '');
-  } catch (e) { log('STT error: ' + e.message, 'warn'); return ''; }
+  } catch (e) {
+    log('STT error: ' + e.message, 'warn');
+    sttFailCount++;
+    if (sttFailCount === 1) {
+      showToast('Speech recognition error: ' + e.message, 'error');
+    }
+    return '';
+  }
 }
 async function flushCommit() {
   const samples = collectUtt(); uttChunks = []; uttCount = 0; lastSentPartialCount = 0; partialGen++; livePartial = ''; renderSTT();
@@ -963,6 +1000,7 @@ async function startPTT() {
   committedText = sttPrefix; livePartial = '';
   uttChunks = []; uttCount = 0; lastSentPartialCount = 0; partialGen = 0;
   sttActive = null; commitPending = false; stopDeferred = null;
+  sttFailCount = 0;
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } });
     audioContext = new AudioContext({ sampleRate: 16000 });
@@ -1085,7 +1123,7 @@ function onRTMsg(m) {
     if (m.role === 'user' && m.final) rtAppendUser(m.text);
     else if (m.role === 'assistant') { if (m.final) rtFinalizeAssistant(); else if (m.text) rtAppendAssistantDelta(m.text); }
   } else if (m.type === 'clear') rtClearPlayback();
-  else if (m.type === 'error') { log('RT: ' + m.text, 'warn'); if (/loading|TTS/i.test(m.text)) { setRTState('connecting'); setTimeout(rtSendStart, 2500); } }
+  else if (m.type === 'error') { log('RT: ' + m.text, 'warn'); showToast('Realtime: ' + m.text, 'error'); if (/loading|TTS/i.test(m.text)) { setRTState('connecting'); setTimeout(rtSendStart, 2500); } }
 }
 async function startRealtime() {
   if (rtRunning) return;

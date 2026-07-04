@@ -27,7 +27,7 @@ except Exception as _rt_err:  # websockets missing -> core chat still works
     print(f"⚠️  Realtime module unavailable (voice mode disabled): {_rt_err}")
 
 LLAMA_API = "http://127.0.0.1:8080/v1/chat/completions"
-STT_API = "http://localhost:8080"
+STT_API = "http://localhost:8081"
 
 # Realtime WebSocket port (set in main(); one above the HTTP port by default).
 RT_WS_PORT = 7778
