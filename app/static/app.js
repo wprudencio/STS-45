@@ -1156,10 +1156,11 @@ async function startRealtime() {
   if (rtRunning) return;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { log('Mic unavailable (page must be HTTPS or localhost)', 'warn'); return; }
   setRTState('connecting');
+  // Enter immersive full-page mode
+  document.querySelector('.topbar').classList.add('hidden');
+  document.querySelector('.shell').classList.add('hidden');
+  document.querySelector('.footer-log').classList.add('hidden');
   document.getElementById('rtView').classList.remove('hidden');
-  document.querySelector('.input-area').classList.add('hidden');
-  document.getElementById('initOverlay').classList.add('hidden');
-  document.getElementById('messages').classList.add('hidden');
   const url = 'ws://' + location.hostname + ':' + RT_WS_PORT + '/ws';
   try { rtWS = new WebSocket(url); }
   catch (e) { log('WS error: ' + e.message, 'warn'); stopRealtimeUI('Tap to start'); return; }
@@ -1193,8 +1194,11 @@ function stopRealtimeUI(msg) {
   rtClearPlayback();
   if (rtPlayCtx) { try { rtPlayCtx.close(); } catch (e) { } rtPlayCtx = null; }
   if (rtWS) { try { rtWS.close(); } catch (e) { } rtWS = null; }
+  // Exit immersive full-page mode
+  document.querySelector('.topbar').classList.remove('hidden');
+  document.querySelector('.shell').classList.remove('hidden');
+  document.querySelector('.footer-log').classList.remove('hidden');
   document.getElementById('rtView').classList.add('hidden');
-  document.querySelector('.input-area').classList.remove('hidden');
   const hasMsgs = currentConvMessages.length > 0;
   document.getElementById('initOverlay').classList.toggle('hidden', hasMsgs);
   document.getElementById('messages').classList.toggle('hidden', !hasMsgs);
