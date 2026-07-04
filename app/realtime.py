@@ -45,8 +45,8 @@ from websockets.asyncio.server import serve
 
 # --- Voice activity detection (mirrors the browser PTT thresholds) ----------
 SR_IN = 16000
-VAD_RMS = 0.012          # low: detects the user's voice while listening (no playback)
-BARGE_RMS = 0.03         # sensitive enough for normal speech over speaker bleed
+VAD_RMS = 0.022          # voice activity detection threshold (was 0.012)
+BARGE_RMS = 0.05         # higher threshold to resist speaker bleed
 SILENCE_MS = 650
 MIN_UTT = int(0.30 * SR_IN)        # ~0.3s minimum utterance
 MAX_UTT = int(12 * SR_IN)          # force-split an over-long run
