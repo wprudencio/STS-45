@@ -201,16 +201,20 @@
 
   <!-- Full-page immersive realtime overlay -->
   <div class="rt-view hidden" id="rtView">
-    <div class="rt-stage">
-      <div class="rt-orb idle" id="rtOrb" onclick="if(!rtRunning)toggleRealtime()"><span class="rt-orb-core"></span></div>
+    <div class="rt-bg"></div>
+    <div class="rt-overlay">
+      <div class="rt-viz-wrap" id="rtVizWrap">
+        <canvas id="rtCanvas"></canvas>
+        <div class="rt-viz-brackets"></div>
+      </div>
       <div class="rt-state" id="rtState">Tap to start</div>
-    </div>
-    <div class="rt-transcript" id="rtTranscript"></div>
-    <div class="rt-controls">
-      <button class="rt-end-btn" id="rtEndBtn" onclick="toggleRealtime()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
-        End
-      </button>
+      <div class="rt-transcript" id="rtTranscript"></div>
+      <div class="rt-controls">
+        <button class="rt-end-btn" id="rtEndBtn" onclick="toggleRealtime()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+          End
+        </button>
+      </div>
     </div>
   </div>
 
