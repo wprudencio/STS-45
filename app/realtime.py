@@ -123,6 +123,8 @@ class _Session:
 
         self.utt = bytearray()       # buffered mic PCM16 for the current utterance
         self.last_voice = 0.0
+        self.last_partial_time = 0.0  # timestamp of last partial STT send
+        self.last_partial_samples = 0  # sample count at last partial
         self.barge_count = 0
         self.barging = False         # capturing the post-barge utterance
 
@@ -216,9 +218,37 @@ class _Session:
 
         n = len(self.utt) // 2
         silence = (now - self.last_voice) * 1000
+
+        # Periodic partial STT while user is speaking (every ~500ms, min 0.5s speech)
+        partial_interval = 0.50  # seconds
+        partial_min_samples = int(0.5 * SR_IN)  # don't send partials for <0.5s speech
+        if n >= partial_min_samples and (now - self.last_partial_time) >= partial_interval \
+                and (n - self.last_partial_samples) >= int(0.35 * SR_IN) \
+                and silence < SILENCE_MS:
+            self.last_partial_time = now
+            self.last_partial_samples = n
+            # Run partial STT in executor (non-blocking)
+            utt_snap = bytes(self.utt)
+            lang = self.cfg.get("lang", "en")
+            stt_api = self.cfg.get("stt_api_url", "")
+            async def _send_partial():
+                try:
+                    loop = asyncio.get_running_loop()
+                    text = await loop.run_in_executor(
+                        None, transcribe_wav,
+                        int16_to_wav_bytes(utt_snap, SR_IN), "partial.wav", lang, stt_api
+                    )
+                    if text and not self.cancel and not self.turn_busy:
+                        self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
+                except Exception:
+                    pass
+            asyncio.create_task(_send_partial())
+
         if n >= MIN_UTT and (silence >= SILENCE_MS or n >= MAX_UTT):
             utt = bytes(self.utt)
             self.utt = bytearray()
+            self.last_partial_time = 0.0
+            self.last_partial_samples = 0
             self.turn_busy = True
             self.barging = False
             self.set_state("thinking")

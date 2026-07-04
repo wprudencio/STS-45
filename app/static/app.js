@@ -1086,11 +1086,33 @@ function rtSettings() {
 }
 function rtSendStart() { if (rtWS && rtWS.readyState === 1) rtWS.send(JSON.stringify(Object.assign({ type: 'start' }, rtSettings()))); }
 function rtEscapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+let rtUserEl = null;
 function rtAppendUser(text) {
   const t = document.getElementById('rtTranscript');
-  const el = document.createElement('div'); el.className = 'rt-line user';
-  el.innerHTML = '<span class="rt-role">You</span>' + rtEscapeHtml(text);
-  t.appendChild(el); t.scrollTop = t.scrollHeight; rtAsstEl = null; rtAsstText = '';
+  if (rtUserEl) {
+    // Finalize the existing partial element
+    rtUserEl.querySelector('.rt-text').textContent = text;
+    rtUserEl.classList.remove('live');
+    rtUserEl = null;
+  } else {
+    const el = document.createElement('div'); el.className = 'rt-line user';
+    el.innerHTML = '<span class="rt-role">You</span>' + rtEscapeHtml(text);
+    t.appendChild(el);
+  }
+  t.scrollTop = t.scrollHeight; rtAsstEl = null; rtAsstText = '';
+}
+function rtUpdateUserPartial(text) {
+  const t = document.getElementById('rtTranscript');
+  if (!rtUserEl) {
+    rtUserEl = document.createElement('div'); rtUserEl.className = 'rt-line user live';
+    rtUserEl.innerHTML = '<span class="rt-role">You</span><span class="rt-text"></span>';
+    t.appendChild(rtUserEl);
+  }
+  rtUserEl.querySelector('.rt-text').textContent = text;
+  t.scrollTop = t.scrollHeight;
+}
+function rtFinalizeUserPartial() {
+  if (rtUserEl) { rtUserEl.classList.remove('live'); rtUserEl = null; }
 }
 function rtAppendAssistantDelta(tok) {
   const t = document.getElementById('rtTranscript');
@@ -1123,8 +1145,10 @@ function onRTMsg(m) {
   if (m.type === 'ready') { rtTTSsr = m.sampleRate || 24000; setRTState('listening'); }
   else if (m.type === 'state') setRTState(m.state);
   else if (m.type === 'transcript') {
-    if (m.role === 'user' && m.final) rtAppendUser(m.text);
-    else if (m.role === 'assistant') { if (m.final) rtFinalizeAssistant(); else if (m.text) rtAppendAssistantDelta(m.text); }
+    if (m.role === 'user') {
+      if (m.final) rtAppendUser(m.text);
+      else rtUpdateUserPartial(m.text);
+    } else if (m.role === 'assistant') { if (m.final) rtFinalizeAssistant(); else if (m.text) rtAppendAssistantDelta(m.text); }
   } else if (m.type === 'clear') rtClearPlayback();
   else if (m.type === 'error') { log('RT: ' + m.text, 'warn'); showToast('Realtime: ' + m.text, 'error'); if (/loading|TTS/i.test(m.text)) { setRTState('connecting'); setTimeout(rtSendStart, 2500); } }
 }
@@ -1178,7 +1202,7 @@ function stopRealtimeUI(msg) {
   setRTState('idle');
   document.getElementById('rtState').textContent = msg || 'Tap to start';
   document.getElementById('rtTranscript').innerHTML = '';
-  rtAsstEl = null; rtAsstText = '';
+  rtAsstEl = null; rtAsstText = ''; rtUserEl = null;
 }
 async function stopRealtime() {
   if (rtWS && rtWS.readyState === 1) { try { rtWS.send(JSON.stringify({ type: 'stop' })); } catch (e) { } }
