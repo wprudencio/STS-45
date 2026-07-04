@@ -1066,9 +1066,14 @@ let rtState = 'idle', rtAsstEl = null, rtAsstText = '';
 
 function setRTState(s) {
   rtState = s;
-  document.getElementById('rtOrb').className = 'rt-orb ' + s;
   const labels = { idle: 'Tap to start', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' };
-  document.getElementById('rtState').textContent = labels[s] || s;
+  const el = document.getElementById('rtState');
+  el.textContent = labels[s] || s;
+  el.className = 'rt-state ' + s;
+  // Update square viz wrap classes
+  const wrap = document.getElementById('rtVizWrap');
+  if (wrap) { wrap.className = 'rt-viz-wrap' + (s === 'listening' || s === 'active' ? ' active' : '') + (s === 'thinking' ? ' thinking' : '') + (s === 'speaking' ? ' speaking' : ''); }
+  if (typeof rtWaveSetState === 'function') rtWaveSetState(s);
 }
 function rtSettings() {
   return {
@@ -1159,6 +1164,7 @@ async function startRealtime() {
   document.querySelector('.shell').classList.add('hidden');
   document.querySelector('.footer-log').classList.add('hidden');
   document.getElementById('rtView').classList.remove('hidden');
+  rtWaveStart();
   const url = 'ws://' + location.hostname + ':' + RT_WS_PORT + '/ws';
   try { rtWS = new WebSocket(url); }
   catch (e) { log('WS error: ' + e.message, 'warn'); stopRealtimeUI('Tap to start'); return; }
@@ -1175,7 +1181,9 @@ async function startRealtime() {
   rtScript.onaudioprocess = (e) => {
     if (!rtWS || rtWS.readyState !== 1) return;
     const d = e.inputBuffer.getChannelData(0); const buf = new Int16Array(d.length);
-    for (let i = 0; i < d.length; i++) { let s = Math.max(-1, Math.min(1, d[i])); buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; }
+    let sumSq = 0;
+    for (let i = 0; i < d.length; i++) { let s = Math.max(-1, Math.min(1, d[i])); buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; sumSq += s * s; }
+    rtWaveEnergy = Math.min(1, Math.sqrt(sumSq / d.length) * 8); // feed wave viz
     rtWS.send(buf.buffer);
   };
   src.connect(rtScript); rtScript.connect(rtCtx.destination);
@@ -1193,6 +1201,7 @@ function stopRealtimeUI(msg) {
   if (rtPlayCtx) { try { rtPlayCtx.close(); } catch (e) { } rtPlayCtx = null; }
   if (rtWS) { try { rtWS.close(); } catch (e) { } rtWS = null; }
   // Exit immersive full-page mode
+  rtWaveStop();
   document.querySelector('.topbar').classList.remove('hidden');
   document.querySelector('.shell').classList.remove('hidden');
   document.querySelector('.footer-log').classList.remove('hidden');
@@ -1211,6 +1220,206 @@ async function stopRealtime() {
   stopRealtimeUI('Ended'); setStatus('Ready', '');
 }
 window.toggleRealtime = function () { if (rtRunning) stopRealtime(); else { setStatus('Realtime', 'active'); startRealtime(); } };
+
+// ============================================================
+// Audio-Reactive Square Wave Viz
+// ============================================================
+let rtWaveRaf = null, rtWaveCanvas = null, rtWaveCtx = null;
+let rtWaveState = 'idle', rtWaveEnergy = 0;
+let rtWaveT = 0, rtWaveParticles = [];
+
+const WAVE_COLORS = {
+  idle:       { r: 60, g: 107, b: 76 },
+  connecting: { r: 60, g: 107, b: 76 },
+  listening:  { r: 184, g: 252, b: 20 },
+  thinking:   { r: 30, g: 111, b: 255 },
+  speaking:   { r: 15, g: 240, b: 232 }
+};
+let rtWaveCurCol = { ...WAVE_COLORS.idle };
+let rtWaveTgtCol = { ...WAVE_COLORS.idle };
+
+function rtWaveSetState(s) {
+  rtWaveState = s;
+  rtWaveTgtCol = { ...WAVE_COLORS[s] || WAVE_COLORS.idle };
+}
+
+function rtWaveStart() {
+  rtWaveCanvas = document.getElementById('rtCanvas');
+  if (!rtWaveCanvas) return;
+  rtWaveCtx = rtWaveCanvas.getContext('2d');
+  const dpr = window.devicePixelRatio > 1 ? 2 : 1;
+  const rect = rtWaveCanvas.parentElement.getBoundingClientRect();
+  rtWaveCanvas.width = rect.width * dpr;
+  rtWaveCanvas.height = rect.height * dpr;
+  rtWaveCanvas.style.width = rect.width + 'px';
+  rtWaveCanvas.style.height = rect.height + 'px';
+  rtWaveParticles = [];
+  for (let i = 0; i < 60; i++) rtWaveParticles.push({ x: Math.random(), y: 0.5 + (Math.random() - 0.5) * 0.3, vx: 0.002 + Math.random() * 0.003, size: 1 + Math.random() * 2.5, life: Math.random() });
+  rtWaveEnergy = 0;
+  window.addEventListener('resize', rtWaveResize);
+  rtWaveRaf = requestAnimationFrame(rtWaveDraw);
+}
+
+function rtWaveStop() {
+  if (rtWaveRaf) cancelAnimationFrame(rtWaveRaf);
+  rtWaveRaf = null;
+  window.removeEventListener('resize', rtWaveResize);
+  rtWaveCanvas = null;
+  rtWaveCtx = null;
+  rtWaveParticles = [];
+  rtWaveEnergy = 0;
+}
+
+function rtWaveResize() {
+  if (!rtWaveCanvas) return;
+  const dpr = window.devicePixelRatio > 1 ? 2 : 1;
+  const rect = rtWaveCanvas.parentElement.getBoundingClientRect();
+  rtWaveCanvas.width = rect.width * dpr;
+  rtWaveCanvas.height = rect.height * dpr;
+  rtWaveCanvas.style.width = rect.width + 'px';
+  rtWaveCanvas.style.height = rect.height + 'px';
+}
+
+function rtWaveDraw() {
+  rtWaveRaf = requestAnimationFrame(rtWaveDraw);
+  const ctx = rtWaveCtx, w = rtWaveCanvas.width, h = rtWaveCanvas.height;
+  if (!ctx) return;
+
+  // Time
+  rtWaveT += 0.016;
+
+  // Decay energy when not receiving mic input
+  rtWaveEnergy *= 0.88;
+
+  // Lerp color
+  const lr = 0.04;
+  rtWaveCurCol.r += (rtWaveTgtCol.r - rtWaveCurCol.r) * lr;
+  rtWaveCurCol.g += (rtWaveTgtCol.g - rtWaveCurCol.g) * lr;
+  rtWaveCurCol.b += (rtWaveTgtCol.b - rtWaveCurCol.b) * lr;
+  const c = rtWaveCurCol;
+
+  // Clear
+  ctx.clearRect(0, 0, w, h);
+
+  const cx = w * 0.5, cy = h * 0.5;
+  const isIdle = rtWaveState === 'idle' || rtWaveState === 'connecting';
+  const isListening = rtWaveState === 'listening';
+  const isThinking = rtWaveState === 'thinking';
+  const isSpeaking = rtWaveState === 'speaking';
+
+  // ── Energy: either from mic (listening) or synthesized ──
+  let energy = rtWaveEnergy;
+  if (isSpeaking) {
+    // AI speaking: synthesized speech-like rhythm
+    const t = rtWaveT * 2.5;
+    energy = 0.15 + 0.35 * (0.5 + 0.5 * Math.sin(t * 1.7)) * (0.5 + 0.5 * Math.sin(t * 3.1 + 0.7));
+  } else if (isThinking) {
+    // Fast thinking pulses
+    energy = 0.08 + 0.18 * (0.5 + 0.5 * Math.sin(rtWaveT * 5));
+  } else if (isIdle) {
+    energy = 0.03 + 0.05 * (0.5 + 0.5 * Math.sin(rtWaveT * 0.8));
+  }
+  energy = Math.max(0, Math.min(1, energy));
+
+  // ── Base amplitude driven by energy ──
+  const baseAmp = h * (isIdle ? 0.03 : isThinking ? 0.06 : 0.04);
+  const amp = baseAmp + energy * h * (isListening ? 0.10 : isSpeaking ? 0.08 : 0.04);
+
+  // ── Speeds per state ──
+  const baseSpeed = isIdle ? 0.5 : isThinking ? 2.2 : isSpeaking ? 1.5 : 1.0;
+  const speed = baseSpeed + energy * (isListening ? 2.0 : 1.0);
+
+  const alpha = isIdle ? 0.3 : 0.6 + energy * 0.3;
+
+  // ── Draw concentric ring (pulses with energy) ──
+  const ringR = Math.min(w, h) * (0.22 + energy * 0.15);
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${alpha * 0.5})`;
+  ctx.lineWidth = 1.5 + energy * 2;
+  ctx.stroke();
+  // Glow ring
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${alpha * 0.15})`;
+  ctx.lineWidth = 6 + energy * 8;
+  ctx.stroke();
+
+  // ── Inner dot that scales with energy ──
+  const dotR = 3 + energy * (isListening ? 10 : 6);
+  ctx.beginPath();
+  ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${alpha})`;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${alpha * 0.35})`;
+  ctx.fill();
+  const glwGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, dotR * 3);
+  glwGrad.addColorStop(0, `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${alpha * 0.4})`);
+  glwGrad.addColorStop(1, `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, 0)`);
+  ctx.beginPath(); ctx.arc(cx, cy, dotR * 3, 0, Math.PI * 2); ctx.fillStyle = glwGrad; ctx.fill();
+
+  // ── 3 layered sine waves ──
+  const pad = w * 0.05;
+  const waveY = cy + (isListening ? h * 0.18 : isSpeaking ? h * 0.14 : h * 0.05) * (0.5 + 0.5 * Math.sin(rtWaveT * 0.3));
+
+  for (let layer = 0; layer < 3; layer++) {
+    const layerAmp = amp * (1 - layer * 0.25) * (1 + energy * 0.5);
+    const layerSpeed = speed * (1 + layer * 0.12);
+    const layerPhase = layer * 1.3 + energy * 0.8;
+    const layerAlpha = alpha * (1 - layer * 0.22);
+    const lineW = layer === 0 ? 2 + energy : layer === 1 ? 1.2 + energy * 0.5 : 0.8;
+
+    ctx.beginPath();
+    let first = true;
+    for (let x = 0; x <= w; x += 2) {
+      const frac = x / w;
+      // Complex wave: multiple harmonics modulated by energy
+      const eMod = 1 + energy * 0.8;
+      const wave =
+        Math.sin(frac * Math.PI * 3 + rtWaveT * speed * eMod + layerPhase) * 0.55
+        + Math.sin(frac * Math.PI * 5.5 + rtWaveT * speed * 0.65 * eMod + layerPhase * 1.6) * 0.28
+        + Math.sin(frac * Math.PI * 1.3 + rtWaveT * speed * 1.4 * eMod) * 0.12
+        + energy * Math.sin(frac * Math.PI * 8 + rtWaveT * speed * 2.5 + layerPhase * 0.5) * 0.15;
+      const py = waveY + wave * layerAmp;
+      if (first) { ctx.moveTo(x, py); first = false; }
+      else ctx.lineTo(x, py);
+    }
+    ctx.strokeStyle = `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${layerAlpha})`;
+    ctx.lineWidth = lineW;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // Glow trail for primary layer
+    if (layer === 0) {
+      ctx.strokeStyle = `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${layerAlpha * 0.25})`;
+      ctx.lineWidth = lineW * 4 + energy * 3;
+      ctx.stroke();
+    }
+  }
+
+  // ── Floating particles along the wave ──
+  for (const p of rtWaveParticles) {
+    p.life += 0.005 + energy * 0.02;
+    if (p.life > 1) { p.life = 0; p.x = 0; p.y = 0.5 + (Math.random() - 0.5) * 0.3; }
+    p.x += p.vx * (1 + energy * 2);
+    if (p.x > 1) { p.x = 0; p.vx = 0.001 + Math.random() * 0.004; p.y = 0.5 + (Math.random() - 0.5) * 0.3; }
+
+    const frac = p.x;
+    const wave =
+      Math.sin(frac * Math.PI * 3 + rtWaveT * speed + p.y * 3) * 0.55
+      + Math.sin(frac * Math.PI * 5.5 + rtWaveT * speed * 0.65 + p.y * 5) * 0.28;
+    const px = frac * w;
+    const py = waveY + wave * amp * 0.8;
+
+    const pAlpha = alpha * 0.4 * Math.sin(p.life * Math.PI);
+    ctx.beginPath();
+    ctx.arc(px, py, p.size * (1 + energy), 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}, ${pAlpha})`;
+    ctx.fill();
+  }
+}
 
 // ============================================================
 // Init
