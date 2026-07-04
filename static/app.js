@@ -1168,6 +1168,9 @@ function stopRealtimeUI(msg) {
   if (rtWS) { try { rtWS.close(); } catch (e) { } rtWS = null; }
   document.getElementById('rtView').classList.add('hidden');
   document.querySelector('.input-area').classList.remove('hidden');
+  const hasMsgs = currentConvMessages.length > 0;
+  document.getElementById('initOverlay').classList.toggle('hidden', hasMsgs);
+  document.getElementById('messages').classList.toggle('hidden', !hasMsgs);
   document.getElementById('rtBtn').classList.remove('active');
   setRTState('idle');
   document.getElementById('rtState').textContent = msg || 'Tap to start';
