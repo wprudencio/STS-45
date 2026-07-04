@@ -128,20 +128,7 @@ body::after {
   pointer-events: none; z-index: 9999;
 }
 
-/* Moving scanline bar */
-body::before {
-  content: '';
-  position: fixed; top: 0; left: 0; right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--neon-green), transparent);
-  opacity: 0.06;
-  pointer-events: none; z-index: 9998;
-  animation: scanbar 8s linear infinite;
-}
-@keyframes scanbar {
-  0%   { top: -2px; }
-  100% { top: 100vh; }
-}
+
 
 /* ════════════════════════════════════════════════════════════
    TOPBAR
