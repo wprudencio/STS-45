@@ -407,11 +407,9 @@ function appendMessage(role, content, idx, meta) {
   if (idx != null) div.dataset.index = idx;
   const now = meta.time ? new Date(meta.time).toTimeString().slice(0, 8) : new Date().toTimeString().slice(0, 8);
 
-  let avatarIcon = ICONS.bot, name = 'Assistant';
-  if (role === 'user') { avatarIcon = ICONS.user; name = 'You'; }
-  else if (role === 'reasoning') { avatarIcon = ICONS.think; name = 'Reasoning'; }
-
-  const avatar = document.createElement('div'); avatar.className = 'msg-avatar'; avatar.innerHTML = avatarIcon;
+  let name = 'Assistant';
+  if (role === 'user') { name = 'You'; }
+  else if (role === 'reasoning') { name = 'Reasoning'; }
   const main = document.createElement('div'); main.className = 'msg-main';
   const head = document.createElement('div'); head.className = 'msg-head';
   const nameEl = document.createElement('span'); nameEl.className = 'msg-name'; nameEl.textContent = name;
@@ -450,7 +448,7 @@ function appendMessage(role, content, idx, meta) {
     if (actions.children.length) main.appendChild(actions);
   }
 
-  div.appendChild(avatar); div.appendChild(main);
+  div.appendChild(main);
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
