@@ -129,7 +129,7 @@ def api_chat():
             messages.append({"role": "user", "content": user_msg})
 
         payload = {
-            "model": config["model"],
+            "model": data.get("model") or config["model"],
             "messages": messages,
             "stream": True,
             "max_tokens": int(data.get("max_tokens", 2048)),

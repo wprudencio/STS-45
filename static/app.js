@@ -73,6 +73,7 @@ function loadSettings() {
   document.getElementById('apiUrl').value = g('supertonic_api_url', DEFAULT_API_URL);
   document.getElementById('apiKey').value = g('supertonic_api_key', '');
   document.getElementById('sttApiUrl').value = g('supertonic_stt_api_url', DEFAULT_STT_API_URL);
+  document.getElementById('modelId').value = g('supertonic_model', 'default');
   document.getElementById('voice').value = g('supertonic_voice', 'M1');
   document.getElementById('lang').value = g('supertonic_lang', 'en');
   const steps = parseInt(g('supertonic_steps', '5'), 10);
@@ -90,6 +91,7 @@ window.saveConnection = function () {
   s('supertonic_api_url', document.getElementById('apiUrl').value.trim());
   s('supertonic_api_key', document.getElementById('apiKey').value.trim());
   s('supertonic_stt_api_url', document.getElementById('sttApiUrl').value.trim());
+  s('supertonic_model', document.getElementById('modelId').value.trim() || 'default');
   s('supertonic_voice', document.getElementById('voice').value);
   s('supertonic_lang', document.getElementById('lang').value);
   s('supertonic_steps', document.getElementById('steps').value);
@@ -568,6 +570,7 @@ async function streamTurn(body) {
     max_tokens: parseInt(document.getElementById('maxTokens').value) || 2048,
     api_url: document.getElementById('apiUrl').value.trim(),
     api_key: document.getElementById('apiKey').value.trim(),
+    model: document.getElementById('modelId').value.trim() || 'default',
     sys_prompt: document.getElementById('sysPrompt').value,
   }, body);
 

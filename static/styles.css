@@ -202,7 +202,7 @@ button { font-family: var(--font); color: inherit; }
 .sugg:hover { background: var(--surface-2); border-color: var(--accent); color: var(--text); transform: translateY(-1px); }
 
 /* ---------- MESSAGES ---------- */
-.messages { flex: 1; overflow-y: auto; min-height: 0; padding: var(--sp-5) var(--sp-4) 80px; display: flex; flex-direction: column; gap: var(--sp-5); scrollbar-width: thin; }
+.messages { flex: 1; overflow-y: auto; min-height: 0; padding: var(--sp-5) var(--sp-6) 80px; display: flex; flex-direction: column; gap: var(--sp-5); scrollbar-width: thin; }
 .messages.hidden { display: none; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -408,7 +408,7 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 0; }
   .shell.collapsed { grid-template-columns: 1fr; }
   .drawer-btn { display: inline-flex; }
   .top-right .header-stats { display: none; }
-  .messages { padding: var(--sp-3); }
+  .messages { padding: var(--sp-3) var(--sp-4); }
   .sc-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
