@@ -1061,7 +1061,7 @@ document.addEventListener('keyup', e => { if (e.key === 'Shift') shiftIsDown = f
 // Realtime conversation mode — ported from original
 // ============================================================
 let rtWS = null, rtCtx = null, rtMicStream = null, rtScript = null, rtRunning = false;
-let rtPlayCtx = null, rtTTSsr = 24000, rtPlaySources = [], rtPlayTime = 0;
+let rtPlayCtx = null, rtTTSsr = 24000, rtPlaySources = [], rtPlayTime = 0, rtAudioMuted = false;
 let rtState = 'idle', rtAsstEl = null, rtAsstText = '';
 
 function setRTState(s) {
@@ -1074,6 +1074,8 @@ function setRTState(s) {
   const wrap = document.getElementById('rtVizWrap');
   if (wrap) { wrap.className = 'rt-viz-wrap' + (s === 'listening' ? ' listening' : '') + (s === 'thinking' ? ' thinking' : '') + (s === 'speaking' ? ' speaking' : ''); }
   if (typeof rtWaveSetState === 'function') rtWaveSetState(s);
+  // Unmute audio when the assistant starts a fresh turn (barge-in resets)
+  if (s === 'speaking' || s === 'listening') rtAudioMuted = false;
 }
 function rtSettings() {
   return {
@@ -1129,11 +1131,12 @@ function rtAppendAssistantDelta(tok) {
 }
 function rtFinalizeAssistant() { if (rtAsstEl) { rtAsstEl.classList.remove('live'); rtAsstEl = null; rtAsstText = ''; } }
 function rtClearPlayback() {
+  rtAudioMuted = true;
   rtPlaySources.forEach(s => { try { s.stop(); } catch (e) { } });
   rtPlaySources = []; if (rtPlayCtx) rtPlayTime = rtPlayCtx.currentTime;
 }
 function onRTAudio(buf) {
-  if (!rtPlayCtx) return;
+  if (!rtPlayCtx || rtAudioMuted) return;
   const i16 = new Int16Array(buf); const f32 = new Float32Array(i16.length);
   let sumSq = 0;
   for (let i = 0; i < i16.length; i++) { const s = i16[i] / 32768; f32[i] = s; sumSq += s * s; }

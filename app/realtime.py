@@ -46,11 +46,11 @@ from websockets.asyncio.server import serve
 # --- Voice activity detection (mirrors the browser PTT thresholds) ----------
 SR_IN = 16000
 VAD_RMS = 0.012          # low: detects the user's voice while listening (no playback)
-BARGE_RMS = 0.05        # higher: resists speaker bleed when interrupting the assistant
+BARGE_RMS = 0.03         # sensitive enough for normal speech over speaker bleed
 SILENCE_MS = 650
 MIN_UTT = int(0.30 * SR_IN)        # ~0.3s minimum utterance
 MAX_UTT = int(12 * SR_IN)          # force-split an over-long run
-BARGE_CONFIRM = 3                  # consecutive voiced frames -> barge-in
+BARGE_CONFIRM = 2                  # consecutive voiced frames -> barge-in (~256ms)
 
 # --- Streaming TTS chunking -------------------------------------------------
 # We synthesize per clause so the first audio appears early and barge-in stays
@@ -190,11 +190,8 @@ class _Session:
         rms, _ = _rms(pcm16_bytes)
         now = time.monotonic()
 
-        # While a turn is running we only watch for barge-in (and, once it has
-        # fired, capture the new utterance). The higher barge threshold resists
-        # speaker->mic bleed so the assistant doesn't interrupt itself; use
-        # headphones to all but eliminate echo.
-        if self.turn_busy:
+        # --- barge-in detection: only watch for triggers while assistant speaks
+        if self.turn_busy and not self.barging:
             if rms >= BARGE_RMS:
                 self.barge_count += 1
                 if self.barge_count >= BARGE_CONFIRM and not self.cancel:
@@ -205,45 +202,43 @@ class _Session:
                     self.last_voice = now
             else:
                 self.barge_count = 0
-            if self.barging:
-                if rms >= VAD_RMS:
-                    self.last_voice = now
-                self.utt.extend(pcm16_bytes)
-            return
+            return  # still just watching; skip utterance logic below
 
-        voiced = rms >= VAD_RMS
-        if voiced:
-            self.last_voice = now
-        self.utt.extend(pcm16_bytes)
+        # --- accumulate audio (normal listening or post-barge capture) ---
+        if not self.turn_busy or self.barging:
+            if rms >= VAD_RMS:
+                self.last_voice = now
+            self.utt.extend(pcm16_bytes)
 
         n = len(self.utt) // 2
         silence = (now - self.last_voice) * 1000
 
-        # Periodic partial STT while user is speaking (every ~500ms, min 0.5s speech)
-        partial_interval = 0.50  # seconds
-        partial_min_samples = int(0.5 * SR_IN)  # don't send partials for <0.5s speech
-        if n >= partial_min_samples and (now - self.last_partial_time) >= partial_interval \
-                and (n - self.last_partial_samples) >= int(0.35 * SR_IN) \
-                and silence < SILENCE_MS:
-            self.last_partial_time = now
-            self.last_partial_samples = n
-            # Run partial STT in executor (non-blocking)
-            utt_snap = bytes(self.utt)
-            lang = self.cfg.get("lang", "en")
-            stt_api = self.cfg.get("stt_api_url", "")
-            async def _send_partial():
-                try:
-                    loop = asyncio.get_running_loop()
-                    text = await loop.run_in_executor(
-                        None, transcribe_wav,
-                        int16_to_wav_bytes(utt_snap, SR_IN), "partial.wav", lang, stt_api
-                    )
-                    if text and not self.cancel and not self.turn_busy:
-                        self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
-                except Exception:
-                    pass
-            asyncio.create_task(_send_partial())
+        # Periodic partial STT (only during normal listening, not barge)
+        if not self.barging:
+            partial_interval = 0.50  # seconds
+            partial_min_samples = int(0.5 * SR_IN)
+            if n >= partial_min_samples and (now - self.last_partial_time) >= partial_interval \
+                    and (n - self.last_partial_samples) >= int(0.35 * SR_IN) \
+                    and silence < SILENCE_MS:
+                self.last_partial_time = now
+                self.last_partial_samples = n
+                utt_snap = bytes(self.utt)
+                lang = self.cfg.get("lang", "en")
+                stt_api = self.cfg.get("stt_api_url", "")
+                async def _send_partial():
+                    try:
+                        loop = asyncio.get_running_loop()
+                        text = await loop.run_in_executor(
+                            None, transcribe_wav,
+                            int16_to_wav_bytes(utt_snap, SR_IN), "partial.wav", lang, stt_api
+                        )
+                        if text and not self.cancel and not self.turn_busy:
+                            self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
+                    except Exception:
+                        pass
+                asyncio.create_task(_send_partial())
 
+        # --- utterance complete? submit to turn queue ---
         if n >= MIN_UTT and (silence >= SILENCE_MS or n >= MAX_UTT):
             utt = bytes(self.utt)
             self.utt = bytearray()
