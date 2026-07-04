@@ -1,2 +1,5 @@
 .DS_Store
 models/
+bin/
+__pycache__/
+*.pyc

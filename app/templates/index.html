@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Supertonic — Voice Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="top-left">
+      <button class="icon-btn drawer-btn" id="drawerBtn" onclick="toggleDrawer()" title="Menu" aria-label="Open menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="brand">
+        <div class="brand-mark"><span></span><span></span><span></span><span></span></div>
+        <span class="brand-name">Supertonic</span>
+      </div>
+    </div>
+    <div class="top-center">
+      <div class="status-dot" id="statusDot"></div>
+      <span class="status-text" id="statusText">Ready</span>
+    </div>
+    <div class="top-right">
+      <div class="header-stats" id="headerStats"></div>
+      <button class="icon-btn" id="rtBtn" onclick="toggleRealtime()" title="Realtime conversation" aria-label="Realtime conversation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      </button>
+      <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+        <span id="themeIcon"></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="drawer-backdrop" id="drawerBackdrop" onclick="closeDrawer()"></div>
+
+  <div class="shell">
+
+    <aside class="panel-left">
+      <div class="sidebar-top">
+        <button class="new-chat-btn" onclick="newConversation()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New chat
+          <kbd>⌘K</kbd>
+        </button>
+        <div class="conv-search-wrap">
+          <span class="conv-search-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+          <input type="text" class="conv-search" id="convSearch" placeholder="Search conversations..." oninput="filterConvs()">
+        </div>
+      </div>
+      <div class="conv-list" id="conversationList"></div>
+      <div class="sidebar-foot">
+        <button class="foot-btn" onclick="openModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
+        <button class="foot-btn" onclick="openShortcuts()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 16h10"/></svg>
+          Shortcuts
+        </button>
+      </div>
+    </aside>
+
+    <main class="panel-center">
+      <div class="rt-view hidden" id="rtView">
+        <div class="rt-stage">
+          <div class="rt-orb idle" id="rtOrb"><span class="rt-orb-core"></span></div>
+          <div class="rt-state" id="rtState">Tap to start</div>
+        </div>
+        <div class="rt-transcript" id="rtTranscript"></div>
+        <div class="rt-controls">
+          <button class="rt-end-btn" id="rtEndBtn" onclick="toggleRealtime()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+            End conversation
+          </button>
+        </div>
+      </div>
+
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <span class="chat-title" id="chatTitle" title="Double-click to rename">New chat</span>
+        </div>
+        <div class="menu-wrap">
+          <button class="icon-btn" id="moreBtn" onclick="toggleMore(event)" title="More" aria-label="More actions">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/></svg>
+          </button>
+          <div class="menu" id="moreMenu" hidden>
+            <button onclick="exportConv('md')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export Markdown</button>
+            <button onclick="exportConv('json')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Export JSON</button>
+            <button onclick="importConv()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Import JSON</button>
+            <hr>
+            <button onclick="openTemplates()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l6 6-9 9H5v-6l9-9z"/><path d="M14 4l6 6"/></svg>Prompt templates</button>
+            <button onclick="openShortcuts()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M7 16h10"/></svg>Keyboard shortcuts</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="conv-prompt" id="convPromptWrap">
+        <div class="conv-prompt-header" onclick="toggleConvPrompt()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="conv-prompt-label">System prompt</span>
+          <span class="conv-prompt-badge">this conversation</span>
+          <span class="conv-prompt-toggle" id="convPromptChevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+        </div>
+        <div class="conv-prompt-body" id="convPromptBody">
+          <textarea class="sys-prompt" id="sysPrompt" rows="2" placeholder="Set instructions for this conversation only. Leave empty for default behavior." oninput="onSysPromptChange()"></textarea>
+        </div>
+      </div>
+
+      <div class="init-overlay" id="initOverlay">
+        <div class="init-mark"><span></span><span></span><span></span><span></span></div>
+        <div class="init-title">How can I help?</div>
+        <div class="init-sub">Hold the mic to talk, or type below. STT and TTS run locally — your audio never leaves this machine.</div>
+        <div class="suggestions" id="suggestions"></div>
+      </div>
+
+      <div class="messages hidden" id="messages"></div>
+
+      <div class="input-area">
+        <div class="input-col">
+          <div class="slash-menu" id="slashMenu"></div>
+          <div class="input-wrap">
+            <button class="ptt-btn" id="pttBtn" title="Hold to talk · ⇧⇧ start · ⇧ stop" aria-label="Push to talk">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <textarea class="user-input" id="userInput" placeholder="Type a message... (use / for templates)" rows="1"
+              onkeydown="handleKey(event)" oninput="autoResize(this); onInputChange(); onSlashInput()"></textarea>
+            <button class="stop-btn" id="stopBtn" onclick="stopGeneration()" hidden title="Stop generating" aria-label="Stop">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+            </button>
+            <button class="send-btn" id="sendBtn" onclick="sendText()" disabled aria-label="Send message">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            </button>
+          </div>
+          <div class="input-hint">
+            <span><kbd>⇧⇧</kbd> mic</span><span><kbd>⇧</kbd> stop</span><span><kbd>↵</kbd> send</span><span><kbd>⇧↵</kbd> newline</span><span><kbd>/</kbd> templates</span><span><kbd>?</kbd> shortcuts</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="footer-log" id="footerLog">
+    <div class="footer-log-header" onclick="toggleLog()">
+      <span class="footer-log-label">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Event log
+      </span>
+      <button class="footer-log-toggle" aria-label="Toggle log"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></button>
+    </div>
+    <div class="footer-log-body"><div class="log-stream" id="logStream"></div></div>
+  </div>
+
+  <!-- Settings -->
+  <div id="settingsModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header"><span class="modal-title">Settings</span><button class="modal-close" onclick="closeModal()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <div class="modal-body">
+        <div class="field"><div class="field-lbl">Voice</div><div class="select-wrap"><select id="voice" onchange="onVoiceChange()">
+          <option value="M1">M1 · Male deep</option><option value="M2">M2 · Male mid</option><option value="M3">M3 · Male bright</option><option value="M4">M4 · Male warm</option><option value="M5">M5 · Male neutral</option>
+          <option value="F1">F1 · Female deep</option><option value="F2">F2 · Female mid</option><option value="F3">F3 · Female bright</option><option value="F4">F4 · Female warm</option><option value="F5">F5 · Female neutral</option>
+        </select></div></div>
+        <div class="field"><div class="field-lbl">Language</div><div class="select-wrap"><select id="lang" onchange="onLangChange()">
+          <option value="en">EN · English</option><option value="pt">PT · Portuguese</option><option value="es">ES · Spanish</option><option value="fr">FR · French</option><option value="de">DE · German</option><option value="ja">JP · Japanese</option><option value="ko">KO · Korean</option>
+        </select></div></div>
+        <div class="slider-row"><div class="slider-label"><span class="slider-name">Diffusion steps</span><span class="slider-val" id="stepsVal">5</span></div><input type="range" id="steps" min="2" max="12" step="1" value="5" oninput="document.getElementById('stepsVal').textContent=this.value; updateSlider(this)"></div>
+        <div class="slider-row"><div class="slider-label"><span class="slider-name">Speed</span><span class="slider-val" id="speedVal">1.15</span></div><input type="range" id="speed" min="0.7" max="2.0" step="0.05" value="1.15" oninput="document.getElementById('speedVal').textContent=parseFloat(this.value).toFixed(2); updateSlider(this)"></div>
+        <hr class="divider">
+        <div class="field"><div class="field-lbl">LLM model</div><input class="field-input" type="text" id="modelId" placeholder="default"></div>
+        <div class="field"><div class="field-lbl">Max tokens (LLM response length)</div><input class="field-input" type="number" id="maxTokens" min="64" max="32768" step="64" value="2048" placeholder="2048"></div>
+        <div class="field"><div class="field-lbl">LLM API URL</div><input class="field-input" type="text" id="apiUrl" placeholder="http://127.0.0.1:8080/v1/chat/completions"></div>
+        <div class="field"><div class="field-lbl">LLM API key</div><input class="field-input" type="password" id="apiKey" placeholder="(leave empty for local)"></div>
+        <div class="field"><div class="field-lbl">STT API URL (parakeet.cpp)</div><input class="field-input" type="text" id="sttApiUrl" placeholder="http://localhost:8080"></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveConnection()">Save</button></div>
+    </div>
+  </div>
+
+  <!-- Templates -->
+  <div id="templatesModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header"><span class="modal-title">Prompt templates</span><button class="modal-close" onclick="closeModalById('templatesModal')" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <div class="modal-body">
+        <div><div class="tpl-section-lbl">Built-in</div><div class="tpl-list" id="builtinTplList"></div></div>
+        <hr class="divider">
+        <div><div class="tpl-section-lbl">Custom</div><div class="tpl-list" id="customTplList"></div></div>
+        <div class="tpl-add">
+          <input type="text" id="newTplTrigger" placeholder="trigger (e.g. fix)" style="max-width:140px">
+          <input type="text" id="newTplText" placeholder="prompt text...">
+          <button class="btn btn-primary" onclick="addCustomTemplate()">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shortcuts -->
+  <div id="shortcutsModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header"><span class="modal-title">Keyboard shortcuts</span><button class="modal-close" onclick="closeModalById('shortcutsModal')" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <div class="modal-body"><div class="sc-grid" id="scGrid"></div></div>
+    </div>
+  </div>
+
+  <input type="file" id="importFile" accept="application/json,.json" style="display:none">
+
+  <script id="boot" type="application/json">{
+    "default_api_url": "{{ default_api_url }}",
+    "default_stt_api_url": "{{ default_stt_api_url }}",
+    "ws_port": {{ ws_port }}
+  }</script>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
