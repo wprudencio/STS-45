@@ -1188,7 +1188,7 @@ async function startRealtime() {
     const d = e.inputBuffer.getChannelData(0); const buf = new Int16Array(d.length);
     let sumSq = 0;
     for (let i = 0; i < d.length; i++) { let s = Math.max(-1, Math.min(1, d[i])); buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; sumSq += s * s; }
-    if (rtRunning) rtPulsePushIn(Math.min(1, Math.sqrt(sumSq / d.length) * 10));
+    if (rtRunning) rtPulsePushIn(Math.min(1, Math.sqrt(sumSq / d.length) * 6));
     rtWS.send(buf.buffer);
   };
   src.connect(rtScript); rtScript.connect(rtCtx.destination);
