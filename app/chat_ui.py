@@ -287,8 +287,7 @@ def api_stt():
     stt_api_url = request.form.get("stt_api", config.get("stt_api_url", STT_API)).strip()
 
     lang_map = {
-        "en": "en", "pt": "pt", "es": "es", "fr": "fr",
-        "de": "de", "ja": "ja", "ko": "ko",
+        "en": "en"
     }
     parakeet_lang = lang_map.get(lang, "en")
 
