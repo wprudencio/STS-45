@@ -1,3 +1,5 @@
 .DS_Store
 models/
-__pycache__/parakeet-server
+__pycache__/
+*.pyc
+parakeet-server
