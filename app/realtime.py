@@ -172,6 +172,7 @@ class _Session:
             utt = await self.turn_q.get()
             if utt is None:
                 break
+            self.turn_busy = True   # guard: old turn finally may have cleared it
             try:
                 await self.loop.run_in_executor(None, self.run_turn, utt)
             except Exception as e:
@@ -200,9 +201,13 @@ class _Session:
                     self.send_json({"type": "clear"})
                     self.utt = bytearray()
                     self.last_voice = now
+                    # fall through — accumulate this frame (don't lose the
+                    # 128 ms that triggered the barge; short utterances depend on it)
             else:
                 self.barge_count = 0
-            return  # still just watching; skip utterance logic below
+            if not self.barging:
+                return  # still just watching; skip utterance logic below
+            # barge just triggered → continue to accumulate below
 
         # --- accumulate audio (normal listening or post-barge capture) ---
         if not self.turn_busy or self.barging:

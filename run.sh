@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR"
 
 # ---------- config ----------
 STT_PORT=8081
-STT_MODEL="models/tdt_ctc-110m-q5_k.gguf"
+STT_MODEL="models/tdt-1.1b-q5_k.gguf"
 CHAT_HOST="${HOST:-0.0.0.0}"
 CHAT_PORT="${PORT:-7777}"
 LLM_API="${LLM_API:-http://127.0.0.1:8080/v1/chat/completions}"
