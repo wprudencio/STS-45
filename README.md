@@ -10,18 +10,47 @@ Browser mic ──→ parakeet.cpp ──→ llama.cpp ──→ Supertonic TTS 
 ## Quick Start
 
 ```bash
-# 1. Download STT model (one-time)
+# 1. Install Python deps
+pip install -r requirements.txt
+
+# 2. Download STT model (one-time)
 mkdir -p models
 curl -L -o models/tdt_ctc-110m-q5_k.gguf \
   https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt_ctc-110m-q5_k.gguf
 
-# 2. Start llama.cpp on host
+# 3. Download parakeet-server binary (one-time)
+#    Grab the macOS binary from:
+#    https://github.com/mudler/parakeet.cpp/releases
+#    Extract and place it in: bin/parakeet-server
+
+# 4. Start llama.cpp on host
 llama-server -m your-model.gguf --port 8080
 
-# 3. Start everything else
-docker compose up -d
+# 5. Start everything else
+./run.sh
 
-# 4. Open http://localhost:7777
+# 6. Open http://localhost:7777
+```
+
+Or override defaults:
+
+```bash
+PORT=9999 LLM_API=http://other-host:8080/v1/chat/completions ./run.sh
+```
+
+## Project structure
+
+```
+supertonic/
+├── app/
+│   ├── chat_ui.py          # Flask API + main entrypoint
+│   ├── realtime.py         # WebSocket realtime server
+│   ├── static/             # CSS, JS
+│   └── templates/          # HTML
+├── bin/                    # parakeet-server binary (gitignored)
+├── models/                 # STT models (gitignored)
+├── run.sh                  # startup script
+└── requirements.txt
 ```
 
 ## Stack
@@ -31,7 +60,7 @@ docker compose up -d
 | STT | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) (NVIDIA NeMo → ggml) | `:8081` |
 | LLM | [llama.cpp](https://github.com/ggerganov/llama.cpp) server | `:8080` |
 | TTS | [Supertonic 3](https://github.com/supertone-inc/supertonic) (ONNX Runtime) | — |
-| UI | Flask + vanilla JS (`templates/`, `static/`) | `:7777` |
+| UI | Flask + vanilla JS | `:7777` |
 
 ## Usage
 
@@ -55,7 +84,7 @@ sentence. Interrupt it any time by speaking — barge-in stops playback.
 
 The realtime pipeline runs over a WebSocket (`ws://<host>:7778/ws`, one port
 above the HTTP port) using the same local STT/LLM/TTS services. Use headphones
-to avoid speaker→mic echo. Tunable knobs (voice, language, steps, speed, system
+to avoid speaker→mic echo. Settings (voice, language, steps, speed, system
 prompt, API URL) are shared with the normal chat via the Settings panel.
 
 ```

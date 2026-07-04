@@ -24,7 +24,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ---------- kill any stale instances ----------
-pkill -f "python3 chat_ui.py" 2>/dev/null || true
+pkill -f "python3.*chat_ui.py" 2>/dev/null || true
 pkill -f "parakeet-server"    2>/dev/null || true
 sleep 1
 
@@ -60,7 +60,7 @@ echo "   STT:  http://localhost:$STT_PORT"
 echo "   LLM:  $LLM_API"
 echo ""
 
-python3 chat_ui.py \
+python3 app/chat_ui.py \
   --host "$CHAT_HOST" \
   --port "$CHAT_PORT" \
   --stt-api "http://localhost:$STT_PORT" \
