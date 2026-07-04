@@ -29,9 +29,10 @@ pkill -f "parakeet-server"    2>/dev/null || true
 sleep 1
 
 # ---------- STT (parakeet) ----------
-if [ ! -f "./parakeet-server" ]; then
-  echo "❌ parakeet-server binary not found."
+if [ ! -f "./bin/parakeet-server" ]; then
+  echo "❌ parakeet-server binary not found in bin/."
   echo "   Download from: https://github.com/mudler/parakeet.cpp/releases"
+  echo "   Extract and place the binary in: ./bin/parakeet-server"
   exit 1
 fi
 
@@ -42,7 +43,7 @@ if [ ! -f "$STT_MODEL" ]; then
 fi
 
 echo "🎙️  Starting parakeet STT on :$STT_PORT..."
-./parakeet-server --model "$STT_MODEL" --port "$STT_PORT" &
+./bin/parakeet-server --model "$STT_MODEL" --port "$STT_PORT" &
 STT_PID=$!
 sleep 2
 
