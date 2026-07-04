@@ -37,7 +37,7 @@ html, body { height: 100%; overflow: hidden; }
   --font-display: 'Chakra Petch', sans-serif;
   --font-mono: 'Share Tech Mono', monospace;
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
-  --col: 760px;
+  --col: 700px;
   --sidebar-w: 280px;
   --dur: 150ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -251,6 +251,8 @@ button { font-family: var(--font-display); color: inherit; cursor: pointer; }
 .messages { flex: 1; overflow-y: auto; min-height: 0; padding: var(--sp-5) var(--sp-6) 80px; display: flex; flex-direction: column; gap: var(--sp-5); }
 .messages.hidden { display: none; }
 .msg { width: 100%; max-width: var(--col); margin: 0 auto; display: flex; gap: var(--sp-3); position: relative; animation: msg-in 250ms var(--ease-out) backwards; }
+.msg.user { justify-content: flex-end; }
+.msg.user .msg-avatar { order: 1; }
 @keyframes msg-in { from { opacity: 0; transform: translateY(6px); } }
 .msg.pinned { background: var(--green-dim); box-shadow: inset 3px 0 0 var(--neon-green), 0 0 8px var(--green-dim); padding-left: var(--sp-3); margin-left: calc(var(--sp-3) * -1); }
 
@@ -272,7 +274,9 @@ button { font-family: var(--font-display); color: inherit; cursor: pointer; }
 .msg-content p { margin-bottom: 0.7em; }
 .msg-content p:last-child { margin-bottom: 0; }
 .msg-content code { font-family: var(--font-mono); font-size: 12px; background: var(--base-input); color: var(--neon-green); padding: 1px 7px; border: 1px solid var(--base-border); }
-.msg.user .msg-content { background: var(--base-card); border: 1px solid var(--base-border); padding: 11px 16px; white-space: pre-wrap; display: inline-block; max-width: 100%; }
+.msg.user .msg-content { background: var(--green-dim); border: 1px solid var(--neon-green); border-right: 2px solid var(--neon-green); padding: 10px 16px; white-space: pre-wrap; max-width: 80%; color: var(--text-primary); }
+.msg.user .msg-avatar { background: var(--green-dim); border-color: var(--neon-green); color: var(--neon-green); box-shadow: 0 0 6px var(--green-dim); }
+.msg.user .msg-name { color: var(--neon-green); }
 .msg.reasoning .msg-content { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); background: var(--base-input); border: 1px solid var(--base-border); border-left: 3px solid var(--neon-blue); padding: 10px 14px; letter-spacing: 0.03em; }
 .msg.reasoning .msg-head { cursor: pointer; }
 .msg.reasoning.collapsed .msg-content { display: none; }
