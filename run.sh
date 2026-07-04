@@ -38,7 +38,7 @@ fi
 
 if [ ! -f "$STT_MODEL" ]; then
   echo "❌ STT model not found: $STT_MODEL"
-  echo "   Run: mkdir -p models && curl -L -o $STT_MODEL https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt_ctc-110m-q5_k.gguf"
+  echo "   Run: mkdir -p models && curl -L -o $STT_MODEL https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt-1.1b-q5_k.gguf"
   exit 1
 fi
 

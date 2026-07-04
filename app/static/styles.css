@@ -387,21 +387,37 @@ hr.divider { border: none; border-top: 1px solid var(--base-border); margin: 0; 
 .rt-viz-wrap.thinking { --c: var(--neon-blue); --c-glow: var(--blue-glow); }
 .rt-viz-wrap.speaking { --c: var(--neon-cyan); --c-glow: var(--cyan-glow); }
 
-.rt-pulse {
-  width: 24px; height: 24px; border-radius: 50%;
-  background: var(--c); box-shadow: 0 0 16px var(--c-glow);
-  animation: rt-breathe 2s ease-in-out infinite;
-  will-change: transform;
+/* --- inner dot: mic input energy --- */
+.rt-pulse-dot {
+  --pin: 0;
+  position: absolute; inset: 0; margin: auto;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--neon-green);
+  box-shadow: 0 0 14px var(--green-glow);
+  transform: scale(calc(1 + var(--pin) * 2.6));
+  transition: none; /* RAF drives every frame, no CSS transition needed */
+  will-change: transform, box-shadow;
 }
-.rt-pulse[data-state="idle"]       { animation-duration: 3s; }
-.rt-pulse[data-state="connecting"] { animation-duration: 1.6s; }
-.rt-pulse[data-state="listening"]  { animation-duration: 1.2s; }
-.rt-pulse[data-state="thinking"]   { animation-duration: .5s; }
-.rt-pulse[data-state="speaking"]   { animation-duration: .9s; }
 
-@keyframes rt-breathe {
-  0%, 100% { transform: scale(1); opacity: .85; }
-  50%      { transform: scale(1.6); opacity: 1; }
+/* --- outer ring: TTS output energy --- */
+.rt-pulse-ring {
+  --pout: 0;
+  position: absolute; inset: -12px; margin: auto;
+  width: 56px; height: 56px; border-radius: 50%;
+  border: 2px solid var(--neon-cyan);
+  box-shadow: 0 0 18px var(--cyan-glow), inset 0 0 12px var(--cyan-dim);
+  transform: scale(calc(1 + var(--pout) * 1.8));
+  transition: border-color 300ms; /* RAF drives scale, only border-color needs transition */
+  will-change: transform, box-shadow;
+  animation: rt-ring-breathe 2s ease-in-out infinite;
+}
+.rt-viz-wrap.thinking .rt-pulse-ring { border-color: var(--neon-blue); box-shadow: 0 0 18px var(--blue-glow), inset 0 0 12px var(--blue-dim); }
+.rt-viz-wrap.speaking .rt-pulse-ring { border-color: var(--neon-cyan); box-shadow: 0 0 18px var(--cyan-glow), inset 0 0 12px var(--cyan-dim); }
+.rt-viz-wrap.listening .rt-pulse-ring { border-color: var(--neon-green); box-shadow: 0 0 18px var(--green-glow), inset 0 0 12px var(--green-dim); }
+
+@keyframes rt-ring-breathe {
+  0%, 100% { opacity: .65; }
+  50%      { opacity: 1; }
 }
 
 .rt-state { font-family: var(--font-mono); font-size: 12px; font-weight: bold; letter-spacing: 0.24em; text-transform: uppercase; color: var(--text-dim); text-shadow: 0 0 8px var(--green-dim); transition: color .3s, text-shadow .3s; }

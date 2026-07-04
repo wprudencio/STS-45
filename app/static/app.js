@@ -1072,7 +1072,7 @@ function setRTState(s) {
   el.className = 'rt-state ' + s;
   // Update square viz wrap classes
   const wrap = document.getElementById('rtVizWrap');
-  if (wrap) { wrap.className = 'rt-viz-wrap' + (s === 'listening' || s === 'active' ? ' active' : '') + (s === 'thinking' ? ' thinking' : '') + (s === 'speaking' ? ' speaking' : ''); }
+  if (wrap) { wrap.className = 'rt-viz-wrap' + (s === 'listening' ? ' listening' : '') + (s === 'thinking' ? ' thinking' : '') + (s === 'speaking' ? ' speaking' : ''); }
   if (typeof rtWaveSetState === 'function') rtWaveSetState(s);
 }
 function rtSettings() {
@@ -1135,7 +1135,9 @@ function rtClearPlayback() {
 function onRTAudio(buf) {
   if (!rtPlayCtx) return;
   const i16 = new Int16Array(buf); const f32 = new Float32Array(i16.length);
-  for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+  let sumSq = 0;
+  for (let i = 0; i < i16.length; i++) { const s = i16[i] / 32768; f32[i] = s; sumSq += s * s; }
+  if (rtRunning) rtPulsePushOut(Math.min(1, Math.sqrt(sumSq / i16.length) * 9));
   const ab = rtPlayCtx.createBuffer(1, f32.length, rtTTSsr);
   ab.copyToChannel(f32, 0);
   const src = rtPlayCtx.createBufferSource(); src.buffer = ab; src.connect(rtPlayCtx.destination);
@@ -1183,6 +1185,7 @@ async function startRealtime() {
     const d = e.inputBuffer.getChannelData(0); const buf = new Int16Array(d.length);
     let sumSq = 0;
     for (let i = 0; i < d.length; i++) { let s = Math.max(-1, Math.min(1, d[i])); buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; sumSq += s * s; }
+    if (rtRunning) rtPulsePushIn(Math.min(1, Math.sqrt(sumSq / d.length) * 10));
     rtWS.send(buf.buffer);
   };
   src.connect(rtScript); rtScript.connect(rtCtx.destination);
@@ -1221,13 +1224,48 @@ async function stopRealtime() {
 window.toggleRealtime = function () { if (rtRunning) stopRealtime(); else { setStatus('Realtime', 'active'); startRealtime(); } };
 
 // ============================================================
-// Minimal CSS pulse viz — no canvas, no raf, no energy
+// Pulse viz — envelope-following dual rings: input (mic) + output (TTS)
 // ============================================================
-let rtPulseEl = null;
+let rtPulseIn = null, rtPulseOut = null;
+let rtEnergyIn = 0, rtTargetIn = 0, rtEnergyOut = 0, rtTargetOut = 0;
+let rtPulseRaf = null;
+const RT_ATTACK = 0.40;   // how fast the ring snaps up to a new peak
+const RT_RELEASE = 0.07;  // how slowly it fades when sound stops
 
-function rtWaveSetState(s) { if (rtPulseEl) rtPulseEl.dataset.state = s; }
-function rtWaveStart() { rtPulseEl = document.getElementById('rtPulse'); }
-function rtWaveStop() { rtPulseEl = null; }
+function rtWaveSetState(s) { /* outer ring color handled via CSS .rt-viz-wrap classes */ }
+
+function rtPulseTick() {
+  rtPulseRaf = requestAnimationFrame(rtPulseTick);
+
+  // Envelope follower: fast-attack, slow-release lerp toward target
+  const a = RT_ATTACK, r = RT_RELEASE;
+  rtEnergyIn  += (rtTargetIn  - rtEnergyIn)  * (rtTargetIn  > rtEnergyIn ? a : r);
+  rtEnergyOut += (rtTargetOut - rtEnergyOut) * (rtTargetOut > rtEnergyOut ? a : r);
+
+  if (rtPulseIn)  rtPulseIn.style.setProperty('--pin',  rtEnergyIn.toFixed(3));
+  if (rtPulseOut) rtPulseOut.style.setProperty('--pout', rtEnergyOut.toFixed(3));
+
+  // Auto-stop the loop when everything has settled to near-zero
+  if (rtEnergyIn < 0.002 && rtTargetIn < 0.002 && rtEnergyOut < 0.002 && rtTargetOut < 0.002) {
+    cancelAnimationFrame(rtPulseRaf); rtPulseRaf = null;
+  }
+}
+
+function rtWaveStart() {
+  rtPulseIn  = document.getElementById('rtPulseIn');
+  rtPulseOut = document.getElementById('rtPulseOut');
+  rtEnergyIn = 0; rtTargetIn = 0; rtEnergyOut = 0; rtTargetOut = 0;
+  if (!rtPulseRaf) rtPulseRaf = requestAnimationFrame(rtPulseTick);
+}
+
+function rtWaveStop() {
+  if (rtPulseRaf) { cancelAnimationFrame(rtPulseRaf); rtPulseRaf = null; }
+  rtEnergyIn = 0; rtTargetIn = 0; rtEnergyOut = 0; rtTargetOut = 0;
+  rtPulseIn = null; rtPulseOut = null;
+}
+
+function rtPulsePushIn(v)  { rtTargetIn  = v; if (!rtPulseRaf) rtPulseRaf = requestAnimationFrame(rtPulseTick); }
+function rtPulsePushOut(v) { rtTargetOut = v; if (!rtPulseRaf) rtPulseRaf = requestAnimationFrame(rtPulseTick); }
 
 // ============================================================
 // Init
