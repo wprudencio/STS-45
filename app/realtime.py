@@ -60,6 +60,14 @@ _CLAUSE_RE = re.compile(
     r"[^.!?;:,\n]+[.!?;:,\n]*\s*",
     re.S,
 )
+# Fast-first-phrase: the first reply chunk is flushed as soon as a soft pause
+# (comma/colon/semicolon/newline) arrives instead of waiting for a full
+# sentence terminator. This shaves the better part of the LLM's first-sentence
+# latency off the time-to-first-audio. Only the very first chunk of each turn
+# uses this; subsequent chunks keep clause boundaries for natural prosody.
+_FIRST_PHRASE_MIN = 4               # min chars before flushing on a soft break
+_FIRST_PHRASE_MAX = 80              # force-flush the first phrase by this length
+_SOFT_END = re.compile(r"[,;:\n]")
 
 
 def _rms(pcm16_bytes):
@@ -277,6 +285,7 @@ class _Session:
 
         acc = ""
         buf = ""
+        first_spoken = False
         for kind, tok in stream_llm(self.history, self.cfg):
             if self.cancel:
                 break
@@ -285,6 +294,18 @@ class _Session:
             self.send_json({"type": "transcript", "role": "assistant", "text": tok, "final": False})
             acc += tok
             buf += tok
+            # Flush the first phrase as early as a soft pause so the user hears
+            # audio before the first sentence is fully generated; after that,
+            # fall back to full-clause flushing for natural prosody.
+            if not first_spoken:
+                piece, buf = _take_first_phrase(buf)
+                if piece is None:
+                    continue
+                self._speak(piece)
+                first_spoken = True
+                if self.cancel:
+                    break
+                continue
             # Flush complete clauses as speech as they arrive.
             while True:
                 piece, buf = _take_one_clause(buf)
@@ -314,6 +335,36 @@ class _Session:
 
 
 _SENT_END = re.compile(r"[.!?]", re.S)
+
+
+def _take_first_phrase(buf):
+    """Like `_take_one_clause` but tuned for the very first reply chunk: it
+    also flushes on a soft pause (comma/colon/semicolon/newline) so audio starts
+    before the first sentence is fully generated. Sentence terminators still
+    flush as before, so a short "Yes." reply never regresses. Returns
+    (piece|None, rest)."""
+    # 1. Flush on a sentence terminator first (preserves prior latency for
+    #    short first sentences that have no qualifying soft pause).
+    m = _SENT_END.search(buf)
+    if m:
+        end = m.end()
+        while end < len(buf) and buf[end] in " \t\n\")\']}":
+            end += 1
+        return buf[:end], buf[end:]
+    # 2. Force-flush once the buffer is long even without any punctuation.
+    if len(buf) >= _FIRST_PHRASE_MAX:
+        cut = buf.rfind(" ")
+        if cut < _FIRST_PHRASE_MIN - 1:
+            return buf, ""
+        return buf[:cut] + " ", buf[cut:]
+    # 3. Early flush on a soft pause once we have enough text.
+    sm = _SOFT_END.search(buf)
+    if sm and sm.start() >= _FIRST_PHRASE_MIN - 1:
+        end = sm.end()
+        while end < len(buf) and buf[end] in " \t":
+            end += 1
+        return buf[:end], buf[end:]
+    return None, buf
 
 
 def _take_one_clause(buf):
