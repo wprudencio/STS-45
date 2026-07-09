@@ -1,11 +1,11 @@
 """
-Realtime voice conversation mode for Supertonic.
+Realtime voice conversation mode for STS-45.
 
 A small asyncio WebSocket server (run in a daemon thread alongside the Flask
 app) that mirrors the Hugging Face "hf-realtime-voice" speech-to-speech loop,
 but fully local:
 
-    you speak -> VAD -> parakeet STT -> llama.cpp LLM -> Supertonic TTS -> orb replies
+    you speak -> VAD -> parakeet STT -> llama.cpp LLM -> Piper TTS -> orb replies
 
 The browser streams 16 kHz PCM16 mono over the socket; the server runs an
 energy VAD to find utterance boundaries, transcribes each utterance, streams
@@ -474,30 +474,29 @@ def stream_llm(history, cfg):
 
 
 def synth_to_pcm16(app, cfg, text):
-    """Synthesize `text` with Kokoro TTS; return int16 PCM numpy array."""
-    pipelines = getattr(app, "tts", None)
-    if not pipelines:
+    """Synthesize `text` with Piper TTS; return int16 PCM numpy array."""
+    voice_map = getattr(app, "tts", None)
+    if not voice_map:
         return None
     try:
-        lang = cfg.get("lang", "en")
-        lang_code = getattr(app, "LANG_MAP", {}).get(lang, "a")
+        from pathlib import Path
+        from piper import PiperVoice
+
+        voice_name = cfg.get("voice", "en_US-lessac-medium")
         with app.tts_lock:
-            if lang_code not in pipelines:
-                from kokoro import KPipeline
-                pipelines[lang_code] = KPipeline(lang_code=lang_code)
-            pipeline = pipelines[lang_code]
-        voice = cfg.get("voice", "af_heart")
-        speed = float(cfg.get("speed", 1.0))
-        with app.tts_lock:
-            gen = pipeline(text, voice=voice, speed=speed)
-            chunks = []
-            for _gs, _ps, audio in gen:
-                chunks.append(audio.squeeze().cpu().numpy())
-        if not chunks:
-            return None
-        w = np.concatenate(chunks).astype(np.float32)
-        w = np.clip(w, -1.0, 1.0)
-        return (w * 32767).astype(np.int16)
+            if voice_name not in voice_map:
+                onnx_path = app._download_voice(voice_name)
+                if onnx_path is None:
+                    return None
+                voice = PiperVoice.load(str(onnx_path))
+                import json
+                cfg_json = json.loads(Path(str(onnx_path) + ".json").read_text())
+                sr = cfg_json.get("audio", {}).get("sample_rate", 22050)
+                voice_map[voice_name] = (voice, sr)
+            voice, sr = voice_map[voice_name]
+        gen = voice.synthesize(text)
+        pcm = b"".join(chunk.audio_int16_bytes for chunk in gen)
+        return np.frombuffer(pcm, dtype=np.int16)
     except Exception as e:
         print(f"[realtime] TTS synth failed: {e}", flush=True)
         return None
@@ -525,8 +524,7 @@ async def _handler(ws):
             if t == "start":
                 sess.cfg = {
                     "lang": data.get("lang", _app.config.get("lang", "en")),
-                    "voice": data.get("voice", _app.config.get("voice", "af_heart")),
-                    "speed": data.get("speed", _app.config.get("speed", 1.0)),
+                    "voice": data.get("voice", _app.config.get("voice", "en_US-lessac-medium")),
                     "max_tokens": int(data.get("max_tokens", 512)),
                     "model": _app.config.get("model", "default"),
                     "api_url": (data.get("api_url") or "").strip() or _app.config.get("api_url", ""),
@@ -539,7 +537,7 @@ async def _handler(ws):
                 if not tts_dict:
                     sess.send_json({"type": "error", "text": "TTS model still loading — retrying…"})
                     continue
-                sess.tts_sr = 24000  # Kokoro sample rate
+                sess.tts_sr = 22050  # Piper sample rate
                 sess.cancel = False
                 sess.set_state("listening")
                 await ws.send(json.dumps({"type": "ready", "sampleRate": sess.tts_sr}))
@@ -579,6 +577,6 @@ def start(host, port, app_module):
         asyncio.set_event_loop(loop)
         loop.run_until_complete(_serve())
 
-    t = threading.Thread(target=_run, daemon=True, name="supertonic-realtime")
+    t = threading.Thread(target=_run, daemon=True, name="sts45-realtime")
     t.start()
     return t

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Supertonic — Realtime</title>
+  <title>STS-45 — Realtime</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
@@ -28,7 +28,7 @@
 
       <div class="rt-brand">
         <div class="brand-mark"><span></span><span></span><span></span><span></span></div>
-        <span class="brand-name">Supertonic · Realtime</span>
+        <span class="brand-name">STS-45 · Realtime</span>
       </div>
 
       <div class="rt-viz-wrap" id="rtVizWrap" onclick="toggleRealtime()">
@@ -54,35 +54,25 @@
     <div class="phead">// system preferences</div>
     <div class="settings-body">
       <div class="field"><div class="field-lbl">Voice</div><div class="select-wrap"><select id="voice">
-        <option value="af_heart">AF Heart · EN female</option>
-        <option value="af_bella">AF Bella · EN female</option>
-        <option value="af_nicole">AF Nicole · EN female</option>
-        <option value="af_sarah">AF Sarah · EN female</option>
-        <option value="af_sky">AF Sky · EN female</option>
-        <option value="am_adam">AM Adam · EN male</option>
-        <option value="am_michael">AM Michael · EN male</option>
-        <option value="bf_emma">BF Emma · UK female</option>
-        <option value="bf_isabella">BF Isabella · UK female</option>
-        <option value="bm_george">BM George · UK male</option>
-        <option value="bm_lewis">BM Lewis · UK male</option>
-        <option value="ef_dora">EF Dora · ES female</option>
-        <option value="em_alex">EM Alex · ES male</option>
-        <option value="ff_siwis">FF Siwis · FR female</option>
-        <option value="if_sara">IF Sara · IT female</option>
-        <option value="im_nicola">IM Nicola · IT male</option>
-        <option value="jf_alpha">JF Alpha · JP female</option>
-        <option value="jm_kumo">JM Kumo · JP male</option>
-        <option value="pf_dora">PF Dora · BR female</option>
-        <option value="pm_alex">PM Alex · BR male</option>
-        <option value="zf_xiaobei">ZF Xiaobei · CN female</option>
-        <option value="zm_yunjian">ZM Yunjian · CN male</option>
+        <option value="en_US-lessac-medium">Lessac · EN female</option>
+        <option value="en_US-amy-low">Amy · EN female</option>
+        <option value="en_US-libritts-high">LibriTTS · EN female</option>
+        <option value="en_US-ryan-high">Ryan · EN male</option>
+        <option value="en_US-joe-medium">Joe · EN male</option>
+        <option value="en_US-kusal-medium">Kusal · EN male</option>
+        <option value="en_GB-alan-medium">Alan · UK male</option>
+        <option value="en_GB-semaine-medium">Semaine · UK female</option>
+        <option value="pt_BR-faber-medium">Faber · BR male</option>
+        <option value="es_ES-carlfm-x_low">Carl · ES male</option>
+        <option value="fr_FR-siwis-medium">Siwis · FR female</option>
+        <option value="de_DE-thorsten-medium">Thorsten · DE male</option>
+        <option value="ja_JP-jvs-medium">JVS · JP female</option>
+        <option value="ko_KR-globalvoice-medium">GlobalVoice · KO female</option>
+        <option value="it_IT-paola-medium">Paola · IT female</option>
       </select></div></div>
       <div class="field"><div class="field-lbl">Language</div><div class="select-wrap"><select id="lang">
         <option value="en">EN · English</option><option value="pt">PT · Portuguese</option><option value="es">ES · Spanish</option><option value="fr">FR · French</option><option value="de">DE · German</option><option value="ja">JP · Japanese</option><option value="ko">KO · Korean</option>
       </select></div></div>
-      <div class="slider-row"><div class="slider-label"><span class="slider-name">Diffusion steps</span><span class="slider-val" id="stepsVal">5</span></div><input type="range" id="steps" min="2" max="12" step="1" value="5" oninput="document.getElementById('stepsVal').textContent=this.value; updateSlider(this)"></div>
-      <div class="slider-row"><div class="slider-label"><span class="slider-name">Speed</span><span class="slider-val" id="speedVal">1.15</span></div><input type="range" id="speed" min="0.7" max="2.0" step="0.05" value="1.15" oninput="document.getElementById('speedVal').textContent=parseFloat(this.value).toFixed(2); updateSlider(this)"></div>
-      <div class="slider-row"><div class="slider-label"><span class="slider-name">Speed</span><span class="slider-val" id="speedVal">1.0</span></div><input type="range" id="speed" min="0.5" max="2.0" step="0.05" value="1.0" oninput="document.getElementById('speedVal').textContent=parseFloat(this.value).toFixed(2); updateSlider(this)"></div>
       <div class="slider-row"><div class="slider-label"><span class="slider-name">Max tokens</span><span class="slider-val" id="maxTokensVal">512</span></div><input type="range" id="maxTokens" min="64" max="4096" step="64" value="512" oninput="document.getElementById('maxTokensVal').textContent=this.value; updateSlider(this)"></div>
       <hr class="divider">
       <div class="field"><div class="field-lbl">System prompt</div><textarea class="field-area" id="sysPrompt" rows="3" placeholder="Instructions for the assistant…"></textarea></div>

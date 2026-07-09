@@ -1,4 +1,4 @@
-// Supertonic Realtime Lite
+// STS-45 Realtime
 const BOOT = JSON.parse(document.getElementById('boot').textContent);
 const DEFAULT_API_URL = BOOT.default_api_url;
 const DEFAULT_STT_API_URL = BOOT.default_stt_api_url;
@@ -7,27 +7,22 @@ const RT_WS_PORT = BOOT.ws_port;
 // ---------- Settings ----------
 function loadSettings() {
   const g = (k, d) => localStorage.getItem(k) || d;
-  document.getElementById('apiUrl').value = g('supertonic_api_url', DEFAULT_API_URL);
-  document.getElementById('apiKey').value = g('supertonic_api_key', '');
-  document.getElementById('sttApiUrl').value = g('supertonic_stt_api_url', DEFAULT_STT_API_URL);
-  document.getElementById('modelId').value = g('supertonic_model', 'default');
-  document.getElementById('voice').value = g('supertonic_voice', 'af_heart');
-  document.getElementById('lang').value = g('supertonic_lang', 'en');
-  const speed = parseFloat(g('supertonic_speed', '1.0'));
-  document.getElementById('speed').value = speed;
-  document.getElementById('speedVal').textContent = speed.toFixed(2);
-  updateSlider(document.getElementById('speed'));
-  const maxTokens = parseInt(g('supertonic_max_tokens', '512'), 10);
+  document.getElementById('apiUrl').value = g('sts45_api_url', DEFAULT_API_URL);
+  document.getElementById('apiKey').value = g('sts45_api_key', '');
+  document.getElementById('sttApiUrl').value = g('sts45_stt_api_url', DEFAULT_STT_API_URL);
+  document.getElementById('modelId').value = g('sts45_model', 'default');
+  document.getElementById('voice').value = g('sts45_voice', 'en_US-lessac-medium');
+  document.getElementById('lang').value = g('sts45_lang', 'en');
+  const maxTokens = parseInt(g('sts45_max_tokens', '512'), 10);
   document.getElementById('maxTokens').value = maxTokens;
   document.getElementById('maxTokensVal').textContent = maxTokens;
   updateSlider(document.getElementById('maxTokens'));
-  document.getElementById('sysPrompt').value = g('supertonic_sys_prompt', '');
+  document.getElementById('sysPrompt').value = g('sts45_sys_prompt', '');
 }
 function readSettings() {
   return {
     lang: document.getElementById('lang').value,
     voice: document.getElementById('voice').value,
-    speed: parseFloat(document.getElementById('speed').value),
     max_tokens: parseInt(document.getElementById('maxTokens').value, 10) || 512,
     api_url: document.getElementById('apiUrl').value.trim(),
     api_key: document.getElementById('apiKey').value.trim(),
@@ -44,15 +39,14 @@ function persistSettingsDebounced() {
 function persistSettings() {
   const s = (k, v) => localStorage.setItem(k, v);
   const v = readSettings();
-  s('supertonic_api_url', v.api_url);
-  s('supertonic_api_key', v.api_key);
-  s('supertonic_stt_api_url', v.stt_api_url);
-  s('supertonic_model', v.model);
-  s('supertonic_voice', v.voice);
-  s('supertonic_lang', v.lang);
-  s('supertonic_speed', v.speed);
-  s('supertonic_max_tokens', v.max_tokens);
-  s('supertonic_sys_prompt', v.sys_prompt);
+  s('sts45_api_url', v.api_url);
+  s('sts45_api_key', v.api_key);
+  s('sts45_stt_api_url', v.stt_api_url);
+  s('sts45_model', v.model);
+  s('sts45_voice', v.voice);
+  s('sts45_lang', v.lang);
+  s('sts45_max_tokens', v.max_tokens);
+  s('sts45_sys_prompt', v.sys_prompt);
   try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) }); } catch (e) { }
   flashHint();
 }
@@ -73,7 +67,7 @@ window.toggleSettings = function () {
   document.getElementById('settingsPanel').classList.toggle('hidden');
 };
 document.querySelectorAll('input, select, textarea').forEach(el => {
-  if (el.id && ['voice', 'lang', 'speed', 'maxTokens', 'apiUrl', 'apiKey', 'modelId', 'sttApiUrl', 'sysPrompt'].includes(el.id)) {
+  if (el.id && ['voice', 'lang', 'maxTokens', 'apiUrl', 'apiKey', 'modelId', 'sttApiUrl', 'sysPrompt'].includes(el.id)) {
     el.addEventListener('input', persistSettingsDebounced);
     el.addEventListener('change', persistSettingsDebounced);
   }
