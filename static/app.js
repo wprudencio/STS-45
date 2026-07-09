@@ -112,7 +112,7 @@ let rtState = 'idle', rtAsstEl = null, rtAsstText = '', rtUserEl = null;
 
 function setRTState(s) {
   rtState = s;
-  const labels = { idle: 'Tap to start', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' };
+  const labels = { idle: '', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' };
   const el = document.getElementById('rtState');
   el.textContent = labels[s] || s;
   el.className = 'rt-state ' + s;
@@ -217,14 +217,14 @@ async function startRealtime() {
   const wsHost = (!location.hostname || location.hostname === '0.0.0.0') ? '127.0.0.1' : location.hostname;
   const url = 'ws://' + wsHost + ':' + RT_WS_PORT + '/ws';
   try { rtWS = new WebSocket(url); }
-  catch (e) { showToast('WS error: ' + e.message, 'error'); stopRealtimeUI('Tap to start'); return; }
+  catch (e) { showToast('WS error: ' + e.message, 'error'); stopRealtimeUI(''); return; }
   rtWS.binaryType = 'arraybuffer';
   rtWS.onopen = () => { rtSendStart(); };
   rtWS.onmessage = (e) => { if (e.data instanceof ArrayBuffer) onRTAudio(e.data); else { try { onRTMsg(JSON.parse(e.data)); } catch (_) { } } };
-  rtWS.onclose = () => { if (rtRunning) { showToast('Realtime disconnected', 'error'); stopRealtimeUI('Tap to start'); } };
+  rtWS.onclose = () => { if (rtRunning) { showToast('Realtime disconnected', 'error'); stopRealtimeUI(''); } };
   rtWS.onerror = () => { showToast('Realtime connection error', 'error'); };
   try { rtMicStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
-  catch (e) { showToast('Mic error: ' + e.message, 'error'); stopRealtimeUI('Tap to start'); return; }
+  catch (e) { showToast('Mic error: ' + e.message, 'error'); stopRealtimeUI(''); return; }
   rtCtx = new AudioContext({ sampleRate: 16000 });
   const src = rtCtx.createMediaStreamSource(rtMicStream);
   rtScript = rtCtx.createScriptProcessor(2048, 1, 1);
@@ -255,14 +255,14 @@ function stopRealtimeUI(msg) {
   if (rtWS) { try { rtWS.close(); } catch (e) { } rtWS = null; }
   rtWaveStop();
   setRTState('idle');
-  document.getElementById('rtState').textContent = msg || 'Tap to start';
+  document.getElementById('rtState').textContent = msg || '';
   document.getElementById('rtTranscript').innerHTML = '';
   rtAsstEl = null; rtAsstText = ''; rtUserEl = null;
 }
 
 async function stopRealtime() {
   if (rtWS && rtWS.readyState === 1) { try { rtWS.send(JSON.stringify({ type: 'stop' })); } catch (e) { } }
-  stopRealtimeUI('Tap to start');
+  stopRealtimeUI('');
 }
 
 window.toggleRealtime = function () { if (rtRunning) stopRealtime(); else startRealtime(); };
