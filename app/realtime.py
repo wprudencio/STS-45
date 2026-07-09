@@ -189,6 +189,7 @@ class _Session:
                 self.turn_busy = False
                 self.barging = False
                 self.cancel = False
+                self._tts_warned = False
                 if not self.closed:
                     self.set_state("listening")
 
@@ -289,6 +290,9 @@ class _Session:
         for kind, tok in stream_llm(self.history, self.cfg):
             if self.cancel:
                 break
+            if kind == "error":
+                self.send_json({"type": "error", "text": tok})
+                continue
             if kind != "text":
                 continue
             self.send_json({"type": "transcript", "role": "assistant", "text": tok, "final": False})
@@ -327,6 +331,12 @@ class _Session:
                 return
             pcm = synth_to_pcm16(self.app, self.cfg, chunk)
             if pcm is None:
+                if not getattr(self, "_tts_warned", False):
+                    self._tts_warned = True
+                    if getattr(self.app, "tts", None) is None:
+                        self.send_json({"type": "error", "text": "TTS model still loading — retrying…"})
+                    else:
+                        self.send_json({"type": "error", "text": "TTS synthesis failed (see server console)."})
                 return
             if self.cancel:
                 return
@@ -431,9 +441,12 @@ def stream_llm(history, cfg):
         r = requests.post(api_url, json=payload, headers=headers, stream=True, timeout=120)
         r.raise_for_status()
         r.encoding = "utf-8"
-    except Exception:
+    except Exception as e:
+        print(f"[realtime] LLM request failed: {e}", flush=True)
+        yield ("error", f"LLM request failed: {e}")
         return
     has_content = False
+    has_reasoning = False
     for line in r.iter_lines(decode_unicode=True):
         if not line or not line.startswith("data: "):
             continue
@@ -451,10 +464,13 @@ def stream_llm(history, cfg):
         reasoning = delta.get("reasoning_content")
         content = delta.get("content")
         if reasoning and not has_content:
+            has_reasoning = True
             yield ("reasoning", reasoning)
         elif content:
             has_content = True
             yield ("text", content)
+    if not has_content and not has_reasoning:
+        yield ("error", "LLM returned no content (check that llama-server is running and the API URL is correct).")
 
 
 def synth_to_pcm16(app, cfg, text):
@@ -474,7 +490,8 @@ def synth_to_pcm16(app, cfg, text):
             )
         w = np.clip(wav.squeeze().astype(np.float32), -1.0, 1.0)
         return (w * 32767).astype(np.int16)
-    except Exception:
+    except Exception as e:
+        print(f"[realtime] TTS synth failed: {e}", flush=True)
         return None
 
 

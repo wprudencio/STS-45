@@ -1137,6 +1137,8 @@ function rtClearPlayback() {
 }
 function onRTAudio(buf) {
   if (!rtPlayCtx || rtAudioMuted) return;
+  if (rtPlayCtx.state === 'suspended') { try { rtPlayCtx.resume(); } catch (e) { } }
+  if (rtPlayCtx.state !== 'running') { log('RT playback AudioContext is ' + rtPlayCtx.state + ' — no audio will play', 'warn'); }
   const i16 = new Int16Array(buf); const f32 = new Float32Array(i16.length);
   let sumSq = 0;
   for (let i = 0; i < i16.length; i++) { const s = i16[i] / 32768; f32[i] = s; sumSq += s * s; }
@@ -1158,7 +1160,7 @@ function onRTMsg(m) {
       else rtUpdateUserPartial(m.text);
     } else if (m.role === 'assistant') { if (m.final) rtFinalizeAssistant(); else if (m.text) rtAppendAssistantDelta(m.text); }
   } else if (m.type === 'clear') rtClearPlayback();
-  else if (m.type === 'error') { log('RT: ' + m.text, 'warn'); showToast('Realtime: ' + m.text, 'error'); if (/loading|TTS/i.test(m.text)) { setRTState('connecting'); setTimeout(rtSendStart, 2500); } }
+  else if (m.type === 'error') { log('RT: ' + m.text, 'warn'); showToast('Realtime: ' + m.text, 'error'); if (/loading/i.test(m.text)) { setRTState('connecting'); setTimeout(rtSendStart, 2500); } }
 }
 async function startRealtime() {
   if (rtRunning) return;
@@ -1170,7 +1172,8 @@ async function startRealtime() {
   document.querySelector('.footer-log').classList.add('hidden');
   document.getElementById('rtView').classList.remove('hidden');
   rtWaveStart();
-  const url = 'ws://' + location.hostname + ':' + RT_WS_PORT + '/ws';
+  const wsHost = (!location.hostname || location.hostname === '0.0.0.0') ? '127.0.0.1' : location.hostname;
+  const url = 'ws://' + wsHost + ':' + RT_WS_PORT + '/ws';
   try { rtWS = new WebSocket(url); }
   catch (e) { log('WS error: ' + e.message, 'warn'); stopRealtimeUI('Tap to start'); return; }
   rtWS.binaryType = 'arraybuffer';
@@ -1193,6 +1196,8 @@ async function startRealtime() {
   };
   src.connect(rtScript); rtScript.connect(rtCtx.destination);
   rtPlayCtx = new AudioContext(); rtPlayTime = rtPlayCtx.currentTime;
+  if (rtPlayCtx.state === 'suspended') { try { await rtPlayCtx.resume(); } catch (e) { log('Could not resume playback AudioContext: ' + e.message, 'warn'); } }
+  if (rtCtx && rtCtx.state === 'suspended') { try { await rtCtx.resume(); } catch (e) { } }
   rtRunning = true;
   document.getElementById('rtBtn').classList.add('active');
   log('Realtime conversation started — just talk (use headphones to avoid echo).', 'hl');
