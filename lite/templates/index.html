@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Supertonic — Realtime</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+  <div class="rt-view" id="rtView">
+    <div class="rt-bg"></div>
+    <div class="rt-overlay">
+      <button class="rt-gear" id="gearBtn" onclick="toggleSettings()" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+
+      <div class="rt-brand">
+        <div class="brand-mark"><span></span><span></span><span></span><span></span></div>
+        <span class="brand-name">Supertonic · Realtime</span>
+      </div>
+
+      <div class="rt-viz-wrap" id="rtVizWrap" onclick="toggleRealtime()">
+        <div class="rt-pulse-ring rt-pulse-out" id="rtPulseOut"></div>
+        <div class="rt-pulse-dot" id="rtPulseIn"></div>
+        <div class="rt-tap-hint" id="rtTapHint">tap to talk</div>
+      </div>
+
+      <div class="rt-state" id="rtState">Tap to start</div>
+
+      <div class="rt-transcript" id="rtTranscript"></div>
+
+      <div class="rt-controls">
+        <button class="rt-end-btn hidden" id="rtEndBtn" onclick="toggleRealtime()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+          End
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings drawer -->
+  <div id="settingsPanel" class="settings-panel hidden">
+    <div class="settings-head">
+      <span>Settings</span>
+      <button class="modal-close" onclick="toggleSettings()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="settings-body">
+      <div class="field"><div class="field-lbl">Voice</div><div class="select-wrap"><select id="voice">
+        <option value="M1">M1 · Male deep</option><option value="M2">M2 · Male mid</option><option value="M3">M3 · Male bright</option><option value="M4">M4 · Male warm</option><option value="M5">M5 · Male neutral</option>
+        <option value="F1">F1 · Female deep</option><option value="F2">F2 · Female mid</option><option value="F3">F3 · Female bright</option><option value="F4">F4 · Female warm</option><option value="F5">F5 · Female neutral</option>
+      </select></div></div>
+      <div class="field"><div class="field-lbl">Language</div><div class="select-wrap"><select id="lang">
+        <option value="en">EN · English</option><option value="pt">PT · Portuguese</option><option value="es">ES · Spanish</option><option value="fr">FR · French</option><option value="de">DE · German</option><option value="ja">JP · Japanese</option><option value="ko">KO · Korean</option>
+      </select></div></div>
+      <div class="slider-row"><div class="slider-label"><span class="slider-name">Diffusion steps</span><span class="slider-val" id="stepsVal">5</span></div><input type="range" id="steps" min="2" max="12" step="1" value="5" oninput="document.getElementById('stepsVal').textContent=this.value; updateSlider(this)"></div>
+      <div class="slider-row"><div class="slider-label"><span class="slider-name">Speed</span><span class="slider-val" id="speedVal">1.15</span></div><input type="range" id="speed" min="0.7" max="2.0" step="0.05" value="1.15" oninput="document.getElementById('speedVal').textContent=parseFloat(this.value).toFixed(2); updateSlider(this)"></div>
+      <div class="slider-row"><div class="slider-label"><span class="slider-name">Max tokens</span><span class="slider-val" id="maxTokensVal">512</span></div><input type="range" id="maxTokens" min="64" max="4096" step="64" value="512" oninput="document.getElementById('maxTokensVal').textContent=this.value; updateSlider(this)"></div>
+      <hr class="divider">
+      <div class="field"><div class="field-lbl">System prompt</div><textarea class="field-area" id="sysPrompt" rows="3" placeholder="Instructions for the assistant…"></textarea></div>
+      <div class="field"><div class="field-lbl">LLM API URL</div><input class="field-input" type="text" id="apiUrl" placeholder="http://127.0.0.1:8080/v1/chat/completions"></div>
+      <div class="field"><div class="field-lbl">LLM API key</div><input class="field-input" type="password" id="apiKey" placeholder="(leave empty for local)"></div>
+      <div class="field"><div class="field-lbl">LLM model</div><input class="field-input" type="text" id="modelId" placeholder="default"></div>
+      <div class="field"><div class="field-lbl">STT API URL (parakeet.cpp)</div><input class="field-input" type="text" id="sttApiUrl" placeholder="http://localhost:8081"></div>
+    </div>
+    <div class="settings-foot">
+      <span class="settings-hint" id="settingsHint">saved automatically</span>
+    </div>
+  </div>
+
+  <script id="boot" type="application/json">{
+    "default_api_url": "{{ default_api_url }}",
+    "default_stt_api_url": "{{ default_stt_api_url }}",
+    "ws_port": {{ ws_port }}
+  }</script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
