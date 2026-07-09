@@ -56,10 +56,10 @@ input, select, textarea { font-family: inherit; }
 .rt-overlay > * { pointer-events: auto; }
 
 /* --- Brand --- */
-.rt-brand { display: flex; align-items: center; gap: 10px; opacity: .8; }
-.brand-mark { width: 18px; height: 18px; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; }
-.brand-mark span { background: var(--amber); box-shadow: 0 0 7px rgba(255,170,0,.6); }
-.brand-name { font-size: 17px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--amber); text-shadow: var(--glow); }
+.rt-brand { position: fixed; bottom: 22px; right: 28px; z-index: 11; display: flex; align-items: center; gap: 8px; opacity: .8; justify-content: flex-end; }
+.brand-mark { width: 14px; height: 14px; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; flex: none; }
+.brand-mark span { background: var(--amber); box-shadow: 0 0 6px rgba(255,170,0,.6); }
+.brand-name { font-size: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--amber); text-shadow: var(--glow); white-space: nowrap; }
 
 /* --- corner icons --- */
 .rt-gear { position: fixed; top: 22px; width: 33px; height: 33px; z-index: 12; color: var(--amber); padding: 0; outline: none; transition: transform .18s steps(5), color .15s; }
