@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """
-Supertonic Realtime Lite — a hands-free, speech-to-speech voice assistant.
-
-Just the realtime orb: mic -> VAD -> parakeet STT -> llama.cpp LLM
--> Supertonic TTS -> speaker, over a single WebSocket. No chat history,
-no sidebar, no push-to-talk. Open the page, tap the orb, and talk.
+Realtime voice orb — VAD → parakeet STT → llama.cpp LLM → Kokoro TTS → speaker.
 
     Browser mic ──16kHz PCM──► ws :PORT ──► VAD -> STT -> LLM -> TTS
     Browser speaker ◄──PCM────────────────────────────────────────┘
+
+Open http://localhost:PORT, tap the orb, and talk.
 """
 
 import argparse
 import sys
 import threading
 
-import numpy as np
 from flask import Flask, render_template, request
-from supertonic import TTS
+from kokoro import KPipeline
 
 try:
     import realtime as _realtime
@@ -36,21 +33,25 @@ SYS_PROMPT = (
 
 app = Flask(__name__)
 
-tts = None
+tts = {}
 tts_lock = threading.Lock()
 
 config = {
     "lang": "en",
-    "voice": "M1",
-    "steps": 5,
-    "speed": 1.15,
+    "voice": "af_heart",
+    "speed": 1.0,
     "api_url": LLAMA_API,
     "stt_api_url": STT_API,
     "model": "default",
 }
 
-# Realtime WebSocket port (HTTP port + 1 by default).
 RT_WS_PORT = 7778
+
+# Language code mapping: iso → kokoro lang_code
+LANG_MAP = {
+    "en": "a", "pt": "p", "es": "e", "fr": "f",
+    "de": "a", "ja": "j", "ko": "a", "it": "i",
+}
 
 
 @app.route("/")
@@ -66,22 +67,19 @@ def index():
 @app.route("/api/settings", methods=["POST"])
 def api_settings():
     data = request.get_json() or {}
-    for key in ("lang", "voice", "api_url", "stt_api_url", "model"):
-        if key in data and data[key] is not None:
-            config[key] = data[key]
-    for key in ("steps", "speed"):
+    for key in ("lang", "voice", "speed", "api_url", "stt_api_url", "model"):
         if key in data and data[key] is not None:
             try:
                 config[key] = type(config[key])(data[key])
             except (TypeError, ValueError):
-                pass
+                config[key] = data[key]
     return {"status": "ok"}
 
 
 @app.route("/api/health")
 def api_health():
     return {
-        "tts_ready": tts is not None,
+        "tts_ready": bool(tts),
         "realtime": _realtime is not None,
         "config": config,
     }
@@ -90,32 +88,30 @@ def api_health():
 def _load_tts_background():
     global tts
     try:
-        tts = TTS(auto_download=True)
-        print("✅ TTS loaded")
+        tts["a"] = KPipeline(lang_code="a")
+        print("✅ Kokoro TTS loaded")
     except Exception as e:
-        print(f"⚠️ TTS loading failed (will retry on first use): {e}")
+        print(f"⚠️ Kokoro loading failed (will retry on first use): {e}")
 
 
 def main():
     global config, RT_WS_PORT
 
-    parser = argparse.ArgumentParser(description="Supertonic Realtime Lite")
-    parser.add_argument("--host", default="0.0.0.0", help="Host (use 0.0.0.0 for LAN access)")
+    parser = argparse.ArgumentParser(description="Realtime voice orb (Kokoro TTS)")
+    parser.add_argument("--host", default="0.0.0.0", help="Host (0.0.0.0 for LAN access)")
     parser.add_argument("--port", type=int, default=7777, help="HTTP port")
-    parser.add_argument("--ws-port", type=int, default=0, help="Realtime WebSocket port (default: HTTP port + 1)")
+    parser.add_argument("--ws-port", type=int, default=0, help="WS port (default: HTTP port + 1)")
     parser.add_argument("--api", default=LLAMA_API, help="LLM API URL")
     parser.add_argument("--stt-api", default=STT_API, help="Parakeet STT server URL")
     parser.add_argument("--model", default="default", help="Model name")
-    parser.add_argument("--voice", default="M1", help="Voice")
+    parser.add_argument("--voice", default="af_heart", help="Kokoro voice")
     parser.add_argument("--lang", default="en", help="Language")
-    parser.add_argument("--steps", type=int, default=5, help="TTS diffusion steps")
-    parser.add_argument("--speed", type=float, default=1.15, help="TTS speed")
+    parser.add_argument("--speed", type=float, default=1.0, help="TTS speed")
     args = parser.parse_args()
 
     config.update({
         "lang": args.lang,
         "voice": args.voice,
-        "steps": args.steps,
         "speed": args.speed,
         "api_url": args.api,
         "stt_api_url": args.stt_api,
@@ -124,7 +120,7 @@ def main():
 
     RT_WS_PORT = args.ws_port or (args.port + 1)
 
-    print("🚀 Loading Supertonic TTS in background...")
+    print("🚀 Loading Kokoro TTS in background...")
     threading.Thread(target=_load_tts_background, daemon=True).start()
 
     if _realtime is not None:
@@ -137,7 +133,7 @@ def main():
 
     print(f"""
 ╔══════════════════════════════════════════╗
-║   🎤 Supertonic Realtime Lite            ║
+║   🎤 Realtime Orb (Kokoro TTS)           ║
 ║   Open: http://{args.host}:{args.port}          ║
 ║   WS:   ws://{args.host}:{RT_WS_PORT}/ws           ║
 ║   LLM:  {args.api}        ║

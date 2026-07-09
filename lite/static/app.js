@@ -11,13 +11,9 @@ function loadSettings() {
   document.getElementById('apiKey').value = g('supertonic_api_key', '');
   document.getElementById('sttApiUrl').value = g('supertonic_stt_api_url', DEFAULT_STT_API_URL);
   document.getElementById('modelId').value = g('supertonic_model', 'default');
-  document.getElementById('voice').value = g('supertonic_voice', 'M1');
+  document.getElementById('voice').value = g('supertonic_voice', 'af_heart');
   document.getElementById('lang').value = g('supertonic_lang', 'en');
-  const steps = parseInt(g('supertonic_steps', '5'), 10);
-  document.getElementById('steps').value = steps;
-  document.getElementById('stepsVal').textContent = steps;
-  updateSlider(document.getElementById('steps'));
-  const speed = parseFloat(g('supertonic_speed', '1.15'));
+  const speed = parseFloat(g('supertonic_speed', '1.0'));
   document.getElementById('speed').value = speed;
   document.getElementById('speedVal').textContent = speed.toFixed(2);
   updateSlider(document.getElementById('speed'));
@@ -31,7 +27,6 @@ function readSettings() {
   return {
     lang: document.getElementById('lang').value,
     voice: document.getElementById('voice').value,
-    steps: parseInt(document.getElementById('steps').value, 10),
     speed: parseFloat(document.getElementById('speed').value),
     max_tokens: parseInt(document.getElementById('maxTokens').value, 10) || 512,
     api_url: document.getElementById('apiUrl').value.trim(),
@@ -55,11 +50,9 @@ function persistSettings() {
   s('supertonic_model', v.model);
   s('supertonic_voice', v.voice);
   s('supertonic_lang', v.lang);
-  s('supertonic_steps', v.steps);
   s('supertonic_speed', v.speed);
   s('supertonic_max_tokens', v.max_tokens);
   s('supertonic_sys_prompt', v.sys_prompt);
-  // push to server so the backend default config follows the UI
   try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) }); } catch (e) { }
   flashHint();
 }
@@ -80,7 +73,7 @@ window.toggleSettings = function () {
   document.getElementById('settingsPanel').classList.toggle('hidden');
 };
 document.querySelectorAll('input, select, textarea').forEach(el => {
-  if (el.id && ['voice', 'lang', 'steps', 'speed', 'maxTokens', 'apiUrl', 'apiKey', 'modelId', 'sttApiUrl', 'sysPrompt'].includes(el.id)) {
+  if (el.id && ['voice', 'lang', 'speed', 'maxTokens', 'apiUrl', 'apiKey', 'modelId', 'sttApiUrl', 'sysPrompt'].includes(el.id)) {
     el.addEventListener('input', persistSettingsDebounced);
     el.addEventListener('change', persistSettingsDebounced);
   }

@@ -53,14 +53,20 @@ if ! kill -0 $STT_PID 2>/dev/null; then
 fi
 
 # ---------- Realtime server (Flask + WS) ----------
-echo "🚀 Starting Supertonic Realtime Lite..."
+echo "🚀 Starting Realtime Orb (Kokoro TTS)..."
 echo "   Open: http://$CHAT_HOST:$CHAT_PORT  (also: http://localhost:$CHAT_PORT)"
 echo "   WS:   ws://$CHAT_HOST:$((CHAT_PORT + 1))/ws"
 echo "   STT:  http://localhost:$STT_PORT"
 echo "   LLM:  $LLM_API"
 echo ""
 
-python3 server.py \
+if [ -f "$SCRIPT_DIR/.venv/bin/python3" ]; then
+  PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+else
+  PYTHON=python3
+fi
+
+$PYTHON server.py \
   --host "$CHAT_HOST" \
   --port "$CHAT_PORT" \
   --stt-api "http://localhost:$STT_PORT" \

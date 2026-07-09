@@ -474,21 +474,29 @@ def stream_llm(history, cfg):
 
 
 def synth_to_pcm16(app, cfg, text):
-    """Synthesize `text` with the shared Supertonic engine; return int16 PCM."""
-    tts = getattr(app, "tts", None)
-    if tts is None:
+    """Synthesize `text` with Kokoro TTS; return int16 PCM numpy array."""
+    pipelines = getattr(app, "tts", None)
+    if not pipelines:
         return None
     try:
-        vs = tts.get_voice_style(voice_name=cfg.get("voice", "M1"))
+        lang = cfg.get("lang", "en")
+        lang_code = getattr(app, "LANG_MAP", {}).get(lang, "a")
         with app.tts_lock:
-            wav, _dur = tts.synthesize(
-                text=text,
-                lang=cfg.get("lang", "en"),
-                voice_style=vs,
-                total_steps=int(cfg.get("steps", 5)),
-                speed=float(cfg.get("speed", 1.15)),
-            )
-        w = np.clip(wav.squeeze().astype(np.float32), -1.0, 1.0)
+            if lang_code not in pipelines:
+                from kokoro import KPipeline
+                pipelines[lang_code] = KPipeline(lang_code=lang_code)
+            pipeline = pipelines[lang_code]
+        voice = cfg.get("voice", "af_heart")
+        speed = float(cfg.get("speed", 1.0))
+        with app.tts_lock:
+            gen = pipeline(text, voice=voice, speed=speed)
+            chunks = []
+            for _gs, _ps, audio in gen:
+                chunks.append(audio.squeeze().cpu().numpy())
+        if not chunks:
+            return None
+        w = np.concatenate(chunks).astype(np.float32)
+        w = np.clip(w, -1.0, 1.0)
         return (w * 32767).astype(np.int16)
     except Exception as e:
         print(f"[realtime] TTS synth failed: {e}", flush=True)
@@ -517,9 +525,8 @@ async def _handler(ws):
             if t == "start":
                 sess.cfg = {
                     "lang": data.get("lang", _app.config.get("lang", "en")),
-                    "voice": data.get("voice", _app.config.get("voice", "M1")),
-                    "steps": data.get("steps", _app.config.get("steps", 5)),
-                    "speed": data.get("speed", _app.config.get("speed", 1.15)),
+                    "voice": data.get("voice", _app.config.get("voice", "af_heart")),
+                    "speed": data.get("speed", _app.config.get("speed", 1.0)),
                     "max_tokens": int(data.get("max_tokens", 512)),
                     "model": _app.config.get("model", "default"),
                     "api_url": (data.get("api_url") or "").strip() or _app.config.get("api_url", ""),
@@ -528,11 +535,11 @@ async def _handler(ws):
                 }
                 sp = (data.get("sys_prompt") or "").strip()
                 sess.history = [{"role": "system", "content": sp or _app.SYS_PROMPT}]
-                tts = getattr(_app, "tts", None)
-                if tts is None:
+                tts_dict = getattr(_app, "tts", None)
+                if not tts_dict:
                     sess.send_json({"type": "error", "text": "TTS model still loading — retrying…"})
                     continue
-                sess.tts_sr = getattr(tts, "sample_rate", 24000)
+                sess.tts_sr = 24000  # Kokoro sample rate
                 sess.cancel = False
                 sess.set_state("listening")
                 await ws.send(json.dumps({"type": "ready", "sampleRate": sess.tts_sr}))

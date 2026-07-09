@@ -1,64 +1,34 @@
-# Supertonic Realtime Lite
+# Realtime Orb (Kokoro TTS)
 
-A lightweight, hands-free **speech-to-speech** voice assistant — just the realtime
-conversation orb from the full Supertonic Voice Chat, nothing else. No chat
-history, no sidebar, no push-to-talk, no markdown. Open the page, tap the orb,
-and talk.
+Hands-free speech-to-speech voice assistant. Tap the orb, talk, it replies.
 
 ```
-Browser mic ──16kHz PCM──► ws :7778 ──► VAD → parakeet → llama.cpp → Supertonic
-                          (binary)                                 ↓ TTS per clause
+Browser mic ──16kHz PCM──► ws :7778 ──► VAD → parakeet → llama.cpp → Kokoro-82M
+                          (binary)                                 ↓ per clause
 Browser speaker ◄──PCM─────────────────────────────────────────────┘
 ```
 
-Everything runs locally. Use headphones to avoid speaker→mic echo.
+Everything runs locally. Use headphones to avoid echo.
 
 ## Quick Start
 
 ```bash
-# 1. Install Python deps
+# 1. Create venv and install deps (Python 3.12 required — torch on Intel Mac)
+python3.12 -m venv lite/.venv
+source lite/.venv/bin/activate
 pip install -r lite/requirements.txt
+pip install "numpy<2"
 
-# 2. Download STT model (one-time)
-mkdir -p lite/models
-curl -L -o lite/models/tdt_ctc-110m-f16.gguf \
-  https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt_ctc-110m-f16.gguf
+# 2. link STT binary and models (already done if you set up the full version)
+# lite/bin -> ../bin   lite/models -> ../models
 
-# 3. Place the parakeet-server binary (one-time)
-#    Grab the macOS binary from:
-#    https://github.com/mudler/parakeet.cpp/releases
-#    Extract and place it in: lite/bin/parakeet-server
-
-# 4. Start llama.cpp on the host
+# 3. Start llama.cpp on the host
 llama-server -m your-model.gguf --port 8080
 
-# 5. Start everything else
+# 4. Start everything else
 ./lite/run.sh
 
-# 6. Open http://localhost:7777  (or http://0.0.0.0:7777)
-```
-
-Or override defaults:
-
-```bash
-PORT=9999 LLM_API=http://other-host:8080/v1/chat/completions ./lite/run.sh
-```
-
-## Structure
-
-```
-lite/
-├── server.py          # Flask: one page + /api/settings + WS realtime startup
-├── realtime.py        # WebSocket realtime pipeline (STT/LLM/TTS)
-├── static/
-│   ├── app.js         # WS connect, mic capture, audio playback, settings
-│   └── styles.css     # neon orb UI
-├── templates/
-│   └── index.html     # full-page orb + transcript + settings drawer
-├── bin/               # parakeet-server binary (gitignored)
-├── models/            # STT models (gitignored)
-├── run.sh             # startup script
-└── requirements.txt
+# 5. Open http://localhost:7777  (or http://0.0.0.0:7777)
 ```
 
 ## Stack
@@ -67,19 +37,16 @@ lite/
 |------|------|------|
 | STT | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) | `:8081` |
 | LLM | [llama.cpp](https://github.com/ggerganov/llama.cpp) server | `:8080` |
-| TTS | [Supertonic](https://github.com/supertone-inc/supertonic) (ONNX Runtime) | — |
+| TTS | [Kokoro-82M](https://github.com/hexgrad/kokoro) (StyleTTS2, 82M params) | — |
 | UI | Flask + vanilla JS | `:7777` (HTTP) · `:7778` (WS) |
 
-## How it works
+## Voices
 
-Tap the orb to start. The browser streams 16 kHz PCM16 to the WebSocket; the
-server runs an energy VAD to find utterance boundaries, transcribes each
-utterance with parakeet, streams the llama.cpp reply, and speaks it back
-sentence-by-sentence as PCM16 frames so audio starts before the full reply is
-generated. Interrupt the assistant any time by speaking — barge-in stops
-playback.
+20+ Kokoro voices across 8 languages: AF Heart, AM Adam, BF Emma, BM George,
+EF Dora, FF Siwis, IF Sara, JF Alpha, PF Dora, ZF Xiaobei, and more. Select
+from the Settings drawer (gear icon, top-right).
 
-Voice, language, diffusion steps, speed, max tokens, system prompt, and the
-STT/LLM API URLs are all in the **Settings** drawer (gear icon, top-right) and
-are shared with the browser via the `/api/settings` endpoint. Settings persist
-in `localStorage`.
+Speed is adjustable (0.5×–2.0×). Language changes also switch the Kokoro model
+so voices from the selected language are used.
+
+First launch downloads the Kokoro-82M model (~300MB). Subsequent starts are instant.
