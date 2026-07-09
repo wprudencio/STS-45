@@ -1,0 +1,42 @@
+services:
+  llama-server:
+    build: docker/llama
+    ports:
+      - "8080:8080"
+    volumes:
+      - llama-models:/models
+    environment:
+      # The model filename to load from /models. The container
+      # auto-downloads it from HuggingFace on first run.
+      MODEL_FILE: "LFM2.5-230M-Q4_K_M.gguf"
+      HF_REPO: "LiquidAI/LFM2.5-230M-GGUF"
+    restart: unless-stopped
+
+  parakeet-stt:
+    build: docker/parakeet
+    ports:
+      - "8081:8081"
+    volumes:
+      - stt-models:/models
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    ports:
+      - "7777:7777"
+      - "7778:7778"
+    volumes:
+      - piper-voices:/app/models/piper
+    environment:
+      LLM_API: "http://llama-server:8080/v1/chat/completions"
+    depends_on:
+      - llama-server
+      - parakeet-stt
+    restart: unless-stopped
+
+volumes:
+  llama-models:
+  stt-models:
+  piper-voices:

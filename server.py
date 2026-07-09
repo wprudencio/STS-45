@@ -10,6 +10,7 @@ Open http://localhost:PORT, tap the orb, and talk.
 
 import argparse
 import json
+import os
 import sys
 import threading
 from pathlib import Path
@@ -130,8 +131,8 @@ def main():
     parser.add_argument("--host", default="0.0.0.0", help="Host (0.0.0.0 for LAN access)")
     parser.add_argument("--port", type=int, default=7777, help="HTTP port")
     parser.add_argument("--ws-port", type=int, default=0, help="WS port (default: HTTP port + 1)")
-    parser.add_argument("--api", default=LLAMA_API, help="LLM API URL")
-    parser.add_argument("--stt-api", default=STT_API, help="Parakeet STT server URL")
+    parser.add_argument("--api", default=os.environ.get("LLM_API", LLAMA_API), help="LLM API URL")
+    parser.add_argument("--stt-api", default=os.environ.get("STT_API", STT_API), help="Parakeet STT server URL")
     parser.add_argument("--model", default="default", help="Model name")
     parser.add_argument("--voice", default="en_US-lessac-medium", help="Piper voice")
     parser.add_argument("--lang", default="en", help="Language")
