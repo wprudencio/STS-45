@@ -6,16 +6,41 @@
   <title>Supertonic — Realtime</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
 
   <div class="rt-view" id="rtView">
     <div class="rt-bg"></div>
+
+    <!-- corner pixel ticks -->
+    <div class="tick" id="t1"></div><div class="tick" id="t2"></div>
+    <div class="tick" id="t3"></div><div class="tick" id="t4"></div>
+
     <div class="rt-overlay">
-      <button class="rt-gear" id="gearBtn" onclick="toggleSettings()" title="Settings" aria-label="Settings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <!-- end icon (top-left) -->
+      <button class="rt-gear rt-end" id="rtEndBtn" onclick="toggleRealtime()" title="End session" aria-label="End session">
+        <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="square">
+          <path d="M16 4 L16 14"/>
+          <path d="M9 8 A10 10 0 1 0 23 8"/>
+        </svg>
+      </button>
+
+      <!-- gear icon (top-right) -->
+      <button class="rt-gear rt-gear-right" id="gearBtn" onclick="toggleSettings()" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 32 32" fill="currentColor" stroke="none">
+          <rect x="14" y="2" width="4" height="5"/>
+          <rect x="14" y="25" width="4" height="5"/>
+          <rect x="2" y="14" width="5" height="4"/>
+          <rect x="25" y="14" width="5" height="4"/>
+          <rect x="5" y="5" width="4" height="4"/>
+          <rect x="23" y="5" width="4" height="4"/>
+          <rect x="5" y="23" width="4" height="4"/>
+          <rect x="23" y="23" width="4" height="4"/>
+          <circle cx="16" cy="16" r="7" fill="none" stroke="currentColor" stroke-width="4"/>
+          <circle cx="16" cy="16" r="2.5"/>
+        </svg>
       </button>
 
       <div class="rt-brand">
@@ -24,6 +49,7 @@
       </div>
 
       <div class="rt-viz-wrap" id="rtVizWrap" onclick="toggleRealtime()">
+        <div class="rt-ring1" id="rtRing1"></div>
         <div class="rt-pulse-ring rt-pulse-out" id="rtPulseOut"></div>
         <div class="rt-pulse-dot" id="rtPulseIn"></div>
         <div class="rt-tap-hint" id="rtTapHint">tap to talk</div>
@@ -33,21 +59,17 @@
 
       <div class="rt-transcript" id="rtTranscript"></div>
 
-      <div class="rt-controls">
-        <button class="rt-end-btn hidden" id="rtEndBtn" onclick="toggleRealtime()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
-          End
-        </button>
-      </div>
+      <div class="rt-filler"></div>
     </div>
   </div>
 
   <!-- Settings drawer -->
   <div id="settingsPanel" class="settings-panel hidden">
     <div class="settings-head">
-      <span>Settings</span>
+      <span>Config</span>
       <button class="modal-close" onclick="toggleSettings()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
+    <div class="phead">// system preferences</div>
     <div class="settings-body">
       <div class="field"><div class="field-lbl">Voice</div><div class="select-wrap"><select id="voice">
         <option value="af_heart">AF Heart · EN female</option>
