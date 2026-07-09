@@ -24,7 +24,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # ---------- kill any stale instances ----------
-pkill -f "python3.*chat_ui.py" 2>/dev/null || true
+pkill -f "python3.*server.py" 2>/dev/null || true
 pkill -f "parakeet-server"    2>/dev/null || true
 sleep 1
 
@@ -52,15 +52,21 @@ if ! kill -0 $STT_PID 2>/dev/null; then
   exit 1
 fi
 
-# ---------- Chat UI (Flask + Realtime WS) ----------
-echo "🚀 Starting Supertonic Voice Chat..."
-echo "   Chat: http://$CHAT_HOST:$CHAT_PORT"
+# ---------- Realtime server (Flask + WS) ----------
+echo "🚀 Starting Realtime Orb (Kokoro TTS)..."
+echo "   Open: http://$CHAT_HOST:$CHAT_PORT  (also: http://localhost:$CHAT_PORT)"
 echo "   WS:   ws://$CHAT_HOST:$((CHAT_PORT + 1))/ws"
 echo "   STT:  http://localhost:$STT_PORT"
 echo "   LLM:  $LLM_API"
 echo ""
 
-python3 app/chat_ui.py \
+if [ -f "$SCRIPT_DIR/.venv/bin/python3" ]; then
+  PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+else
+  PYTHON=python3
+fi
+
+$PYTHON server.py \
   --host "$CHAT_HOST" \
   --port "$CHAT_PORT" \
   --stt-api "http://localhost:$STT_PORT" \

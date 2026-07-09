@@ -1,35 +1,41 @@
-# Supertonic — Voice Chat
+# Realtime Orb (Kokoro TTS)
 
-Local voice assistant: mic → STT → LLM → TTS → speaker. Everything on-device.
+Hands-free speech-to-speech voice assistant. Tap the orb, talk, it replies.
 
 ```
-Browser mic ──→ parakeet.cpp ──→ llama.cpp ──→ Supertonic TTS ──→ audio
-               (STT)            (LLM)         (ONNX Runtime)
+Browser mic ──16kHz PCM──► ws :7778 ──► VAD → parakeet → llama.cpp → Kokoro-82M
+                          (binary)                                 ↓ per clause
+Browser speaker ◄──PCM─────────────────────────────────────────────┘
 ```
+
+Everything runs locally. Use headphones to avoid echo.
 
 ## Quick Start
 
 ```bash
-# 1. Install Python deps
+# 1. Create venv and install deps (Python 3.12 required — torch on Intel Mac)
+python3.12 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+pip install "numpy<2"
 
 # 2. Download STT model (one-time)
 mkdir -p models
-curl -L -o models/tdt_ctc-110m-q5_k.gguf \
-  https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt_ctc-110m-q5_k.gguf
+curl -L -o models/tdt_ctc-110m-f16.gguf \
+  https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt_ctc-110m-f16.gguf
 
-# 3. Download parakeet-server binary (one-time)
+# 3. Place the parakeet-server binary (one-time)
 #    Grab the macOS binary from:
 #    https://github.com/mudler/parakeet.cpp/releases
 #    Extract and place it in: bin/parakeet-server
 
-# 4. Start llama.cpp on host
+# 4. Start llama.cpp on the host
 llama-server -m your-model.gguf --port 8080
 
 # 5. Start everything else
 ./run.sh
 
-# 6. Open http://localhost:7777
+# 6. Open http://localhost:7777  (or http://0.0.0.0:7777)
 ```
 
 Or override defaults:
@@ -38,57 +44,39 @@ Or override defaults:
 PORT=9999 LLM_API=http://other-host:8080/v1/chat/completions ./run.sh
 ```
 
-## Project structure
+## Structure
 
 ```
-supertonic/
-├── app/
-│   ├── chat_ui.py          # Flask API + main entrypoint
-│   ├── realtime.py         # WebSocket realtime server
-│   ├── static/             # CSS, JS
-│   └── templates/          # HTML
-├── bin/                    # parakeet-server binary (gitignored)
-├── models/                 # STT models (gitignored)
-├── run.sh                  # startup script
-└── requirements.txt
+├── server.py          Flask: one page + WS realtime startup
+├── realtime.py        WebSocket realtime pipeline (STT/LLM/TTS)
+├── static/
+│   ├── app.js         WS connect, mic capture, audio playback, settings
+│   └── styles.css     neon orb UI
+├── templates/
+│   └── index.html     full-page orb + transcript + settings drawer
+├── bin/               parakeet-server binary (gitignored)
+├── models/            STT models (gitignored)
+├── run.sh             startup script
+├── requirements.txt
+└── .venv/             Python 3.12 venv (gitignored)
 ```
 
 ## Stack
 
 | Role | Tech | Port |
 |------|------|------|
-| STT | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) (NVIDIA NeMo → ggml) | `:8081` |
+| STT | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) | `:8081` |
 | LLM | [llama.cpp](https://github.com/ggerganov/llama.cpp) server | `:8080` |
-| TTS | [Supertonic 3](https://github.com/supertone-inc/supertonic) (ONNX Runtime) | — |
-| UI | Flask + vanilla JS | `:7777` |
+| TTS | [Kokoro-82M](https://github.com/hexgrad/kokoro) (StyleTTS2, 82M params) | — |
+| UI | Flask + vanilla JS | `:7777` (HTTP) · `:7778` (WS) |
 
-## Usage
+## Voices
 
-Click the mic button (or double-tap `Shift`) to talk; `Shift` once stops the
-mic, `Enter` sends. Edit voice, language, and system prompt from the **Settings**
-dialog and the per-conversation system-prompt strip.
+20+ Kokoro voices across 8 languages: AF Heart, AM Adam, BF Emma, BM George,
+EF Dora, FF Siwis, IF Sara, JF Alpha, PF Dora, ZF Xiaobei, and more. Select
+from the Settings drawer (gear icon, top-right).
 
-Extra features: stop/regenerate a response, edit & resend a previous user
-message, branch a conversation from any message, pin messages, export/import
-(Markdown or JSON), prompt templates (type `/`), live token & latency stats,
-and a keyboard-shortcut overlay (`?` or `⌘⇧O`). All conversation history is
-stored locally in your browser (IndexedDB).
+Speed is adjustable (0.5×–2.0×). Language changes also switch the Kokoro model
+so voices from the selected language are used.
 
-## Realtime conversation mode
-
-Tap the **mic icon in the top-right** to start a hands-free, speech-to-speech
-conversation — like the [HF realtime voice](https://huggingface.co/spaces/smolagents/hf-realtime-voice)
-demo, but fully local. Just talk; the assistant listens (VAD), transcribes
-(parakeet), thinks (llama.cpp), and speaks back (Supertonic TTS) sentence by
-sentence. Interrupt it any time by speaking — barge-in stops playback.
-
-The realtime pipeline runs over a WebSocket (`ws://<host>:7778/ws`, one port
-above the HTTP port) using the same local STT/LLM/TTS services. Use headphones
-to avoid speaker→mic echo. Settings (voice, language, steps, speed, system
-prompt, API URL) are shared with the normal chat via the Settings panel.
-
-```
-Browser mic ──16kHz PCM──→ ws :7778 ──→ VAD → parakeet → llama.cpp → Supertonic
-                          (binary)                                 ↓ sentence TTS
-Browser speaker ←──PCM─────────────────────────────────────────────┘
-```
+First launch downloads the Kokoro-82M model (~300MB). Subsequent starts are instant.
