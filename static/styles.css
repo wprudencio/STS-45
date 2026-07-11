@@ -98,7 +98,7 @@ input, select, textarea { font-family: inherit; }
   width: 106px; height: 106px; border-radius: 50%;
   border: 5px solid var(--amber);
   box-shadow: 0 0 18px rgba(255,170,0,.45), inset 0 0 14px rgba(255,170,0,.15);
-  transform: scale(calc(1 + var(--pout) * 1.6));
+  transform: scale(calc(1 + var(--pout) * 0.5));
   opacity: .85;
   will-change: transform, box-shadow;
   animation: breathe 2s ease-in-out infinite;
@@ -112,7 +112,7 @@ input, select, textarea { font-family: inherit; }
   width: 34px; height: 34px; border-radius: 50%;
   background: var(--amber);
   box-shadow: 0 0 0 6px var(--bg), 0 0 24px var(--amber);
-  transform: scale(calc(1 + var(--pin) * 2.4));
+  transform: scale(calc(1 + var(--pin) * 1.6));
   will-change: transform, box-shadow;
 }
 .rt-viz-wrap.thinking .rt-pulse-dot { background: var(--amber-soft); }

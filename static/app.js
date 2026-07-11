@@ -187,7 +187,7 @@ function onRTAudio(buf) {
   const i16 = new Int16Array(buf); const f32 = new Float32Array(i16.length);
   let sumSq = 0;
   for (let i = 0; i < i16.length; i++) { const s = i16[i] / 32768; f32[i] = s; sumSq += s * s; }
-  rtPulsePushOut(Math.min(1, Math.sqrt(sumSq / i16.length) * 9));
+  rtPulsePushOut(Math.min(0.7, Math.sqrt(sumSq / i16.length) * 5));
   const ab = rtPlayCtx.createBuffer(1, f32.length, rtTTSsr);
   ab.copyToChannel(f32, 0);
   const src = rtPlayCtx.createBufferSource(); src.buffer = ab; src.connect(rtPlayCtx.destination);
@@ -313,11 +313,11 @@ function rtPulseTick() {
   let pin = rtEnergyIn;
   if (rtState === 'speaking' && rtRing1) {
     pin = Math.max(rtEnergyIn, rtEnergyOut);
-    const e = rtEnergyOut;
+    const e = Math.min(0.7, rtEnergyOut);
     if (!rtRing1Driven) { rtRing1Driven = true; rtRing1.style.animation = 'none'; }
-    rtRing1.style.transform = 'scale(' + (1 + e * 1.25).toFixed(3) + ')';
-    rtRing1.style.opacity = (0.2 + e * 0.5).toFixed(3);
-    rtRing1.style.boxShadow = ('0 0 ' + (10 + e * 26).toFixed(0) + 'px rgba(255,170,0,' + (0.3 + e * 0.5).toFixed(2) + ')');
+    rtRing1.style.transform = 'scale(' + (1 + e * 0.45).toFixed(3) + ')';
+    rtRing1.style.opacity = (0.2 + e * 0.4).toFixed(3);
+    rtRing1.style.boxShadow = ('0 0 ' + (10 + e * 18).toFixed(0) + 'px rgba(255,170,0,' + (0.3 + e * 0.4).toFixed(2) + ')');
   } else if (rtRing1Driven && rtRing1) {
     // hand control back to the CSS keyframe animations
     rtRing1Driven = false;
