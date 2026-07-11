@@ -89,6 +89,7 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp
 let rtWS = null, rtCtx = null, rtMicStream = null, rtScript = null, rtRunning = false;
 let rtPlayCtx = null, rtTTSsr = 24000, rtPlaySources = [], rtPlayTime = 0, rtAudioMuted = false;
 let rtState = 'idle', rtAsstEl = null, rtAsstText = '', rtUserEl = null;
+const RT_MAX_LINES = 40;  // cap transcript DOM growth; old lines trimmed to keep long sessions fast
 // client-side barge-in: stop AI playback the moment the user starts talking,
 // without waiting for the server round-trip.
 let rtBargeCount = 0, rtBargeArmed = true, rtBargeArmedTimer = null;
@@ -131,6 +132,7 @@ function rtSendStart() { if (rtWS && rtWS.readyState === 1) rtWS.send(JSON.strin
 
 function rtAppendUser(text) {
   const t = document.getElementById('rtTranscript');
+  rtTrimTranscript(t);
   if (rtUserEl) {
     rtUserEl.querySelector('.rt-text').textContent = text;
     rtUserEl.classList.remove('live');
@@ -145,6 +147,7 @@ function rtAppendUser(text) {
 }
 function rtUpdateUserPartial(text) {
   const t = document.getElementById('rtTranscript');
+  rtTrimTranscript(t);
   if (!rtUserEl) {
     rtUserEl = document.createElement('div'); rtUserEl.className = 'rt-line user live';
     rtUserEl.innerHTML = '<span class="rt-role">You</span><span class="rt-text"></span>';
@@ -156,6 +159,7 @@ function rtUpdateUserPartial(text) {
 function rtAppendAssistantDelta(tok) {
   const t = document.getElementById('rtTranscript');
   if (!rtAsstEl) {
+    rtTrimTranscript(t);
     rtAsstEl = document.createElement('div'); rtAsstEl.className = 'rt-line assistant live';
     rtAsstEl.innerHTML = '<span class="rt-role">Assistant</span><span class="rt-text"></span>';
     t.appendChild(rtAsstEl); rtAsstText = '';
@@ -164,6 +168,11 @@ function rtAppendAssistantDelta(tok) {
   t.scrollTop = t.scrollHeight;
 }
 function rtFinalizeAssistant() { if (rtAsstEl) { rtAsstEl.classList.remove('live'); rtAsstEl = null; rtAsstText = ''; } }
+function rtTrimTranscript(t) {
+  // drop the oldest lines once we exceed the cap; keeps the DOM small so a
+  // long session never turns into a giant, slow-to-paint/scroll tree.
+  while (t.childElementCount > RT_MAX_LINES) t.removeChild(t.firstElementChild);
+}
 
 function rtClearPlayback() {
   rtAudioMuted = true;
