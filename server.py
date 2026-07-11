@@ -11,6 +11,7 @@ Open http://localhost:PORT, tap the orb, and talk.
 import argparse
 import json
 import os
+import signal
 import sys
 import threading
 from pathlib import Path
@@ -52,6 +53,23 @@ config = {
 
 RT_WS_PORT = 7778
 CLIENT_WS_PORT = int(os.environ.get("WS_CLIENT_PORT", 0))
+
+# --- graceful shutdown ------------------------------------------------------
+# Flask's dev server (Werkzeug) installs a handler for SIGINT (KeyboardInterrupt)
+# but NOT SIGTERM, which is what `docker stop` sends. Without a SIGTERM handler
+# Werkzeug swallows the interruption while blocked in accept()/select(), so the
+# container ignores `docker stop` until Docker's 10s SIGKILL timeout -- the
+# "can't stop the app" symptom. We catch both and exit promptly.
+_exiting = threading.Event()
+
+def _on_signal(signum, _frame):
+    print(f"\n🛑 Caught signal {signum}, exiting…", flush=True)
+    _exiting.set()
+    # werkzeug.serving runs in the main thread; raising SystemExit there is the
+    # only thing that reliably breaks its serve_forever(). os._exit is too harsh
+    # (skips the realtime daemon cleanup) -- SystemExit lets daemon threads die
+    # normally and Python finishes promptly.
+    raise SystemExit(0)
 
 
 def _voice_url(voice_name):
@@ -159,7 +177,7 @@ def main():
         print("  Realtime mode unavailable (websockets not installed).")
 
     print(f"""
-╔══════════════════════════════════════════╗
+╔════════════════════════════════════════╗
 ║   🎤 STS-45 (Piper TTS)                  ║
 ║   Open: http://{args.host}:{args.port}          ║
 ║   WS:   ws://{args.host}:{RT_WS_PORT}/ws           ║
@@ -169,7 +187,23 @@ def main():
 ╚══════════════════════════════════════════╝
 """)
 
-    app.run(host=args.host, port=args.port, debug=False, threaded=True)
+    # Install signal handlers BEFORE app.run() so we own the main thread's
+    # signal delivery instead of relying on Werkzeug's SIGINT-only handling.
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+
+    # Use make_server() so we own the server object; our SIGTERM/SIGINT handler
+    # above raises SystemExit in the main thread, which breaks serve_forever()
+    # promptly. This is what makes `docker stop` actually stop instead of
+    # hanging until SIGKILL.
+    try:
+        from werkzeug.serving import make_server
+        srv = make_server(args.host, args.port, app, threaded=True)
+        srv.serve_forever()
+    except SystemExit:
+        print("✅ Server stopped.", flush=True)
+    except KeyboardInterrupt:
+        print("✅ Server stopped.", flush=True)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ services:
       - llama-server
       - parakeet-stt
     restart: unless-stopped
+    stop_grace_period: 3s
 
   nginx:
     build: docker/nginx
