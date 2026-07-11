@@ -46,11 +46,11 @@ from websockets.asyncio.server import serve
 # --- Voice activity detection (mirrors the browser PTT thresholds) ----------
 SR_IN = 16000
 VAD_RMS = 0.022          # voice activity detection threshold (was 0.012)
-BARGE_RMS = 0.05         # higher threshold to resist speaker bleed
+BARGE_RMS = 0.030         # barge-in threshold: lower = easier to interrupt (was 0.05)
 SILENCE_MS = 650
 MIN_UTT = int(0.30 * SR_IN)        # ~0.3s minimum utterance
 MAX_UTT = int(12 * SR_IN)          # force-split an over-long run
-BARGE_CONFIRM = 2                  # consecutive voiced frames -> barge-in (~256ms)
+BARGE_CONFIRM = 2                  # consecutive voiced frames -> barge-in (~256ms, guards against clicks)
 
 # --- Streaming TTS chunking -------------------------------------------------
 # We synthesize per clause so the first audio appears early and barge-in stays
@@ -542,7 +542,16 @@ async def _handler(ws):
                 sess.set_state("listening")
                 await ws.send(json.dumps({"type": "ready", "sampleRate": sess.tts_sr}))
             elif t == "barge":
-                sess.cancel = True
+                # Client-side instant barge: stop playback locally + tell server
+                # to abandon the current turn AND capture the interrupting speech.
+                if sess.turn_busy and not sess.barging:
+                    sess.barging = True
+                    sess.cancel = True
+                    sess.barge_count = 0
+                    sess.utt = bytearray()
+                    sess.last_voice = time.monotonic()
+                    sess.send_json({"type": "clear"})
+                    sess.set_state("listening")
             elif t == "stop":
                 break
     except Exception:

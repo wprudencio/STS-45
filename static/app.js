@@ -89,6 +89,25 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp
 let rtWS = null, rtCtx = null, rtMicStream = null, rtScript = null, rtRunning = false;
 let rtPlayCtx = null, rtTTSsr = 24000, rtPlaySources = [], rtPlayTime = 0, rtAudioMuted = false;
 let rtState = 'idle', rtAsstEl = null, rtAsstText = '', rtUserEl = null;
+// client-side barge-in: stop AI playback the moment the user starts talking,
+// without waiting for the server round-trip.
+let rtBargeCount = 0, rtBargeArmed = true, rtBargeArmedTimer = null;
+const RT_BARGE_RMS = 0.030;     // mic input energy that counts as "user talking"
+const RT_BARGE_CONFIRM = 2;     // consecutive voiced 128ms frames -> trigger
+const RT_BARGE_COOLDOWN = 500;  // ms before another barge can fire
+
+function rtBarge() {
+  // stop local playback instantly and tell server to drop the current turn
+  if (!rtBargeArmed) return;
+  rtBargeArmed = false;
+  clearTimeout(rtBargeArmedTimer);
+  rtBargeArmedTimer = setTimeout(() => { rtBargeArmed = true; rtBargeCount = 0; }, RT_BARGE_COOLDOWN);
+  rtClearPlayback();
+  if (rtWS && rtWS.readyState === 1) {
+    try { rtWS.send(JSON.stringify({ type: 'barge' })); } catch (e) { }
+  }
+  setRTState('listening');
+}
 
 function setRTState(s) {
   rtState = s;
@@ -216,7 +235,20 @@ async function startRealtime() {
     const d = e.inputBuffer.getChannelData(0); const buf = new Int16Array(d.length);
     let sumSq = 0;
     for (let i = 0; i < d.length; i++) { let s = Math.max(-1, Math.min(1, d[i])); buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; sumSq += s * s; }
-    rtPulsePushIn(Math.min(1, Math.sqrt(sumSq / d.length) * 6));
+    const inRms = Math.sqrt(sumSq / d.length);
+    rtPulsePushIn(Math.min(1, inRms * 6));
+    // client-side instant barge-in: while the AI is speaking or thinking, the
+    // user's voice (echo-cancelled by the browser) stops playback immediately.
+    if (rtBargeArmed && (rtState === 'speaking' || rtState === 'thinking')) {
+      if (inRms >= RT_BARGE_RMS) {
+        rtBargeCount++;
+        if (rtBargeCount >= RT_BARGE_CONFIRM) rtBarge();
+      } else {
+        rtBargeCount = 0;
+      }
+    } else {
+      rtBargeCount = 0;
+    }
     rtWS.send(buf.buffer);
   };
   src.connect(rtScript); rtScript.connect(rtCtx.destination);
@@ -230,6 +262,7 @@ async function startRealtime() {
 
 function stopRealtimeUI(msg) {
   rtRunning = false;
+  rtBargeCount = 0; rtBargeArmed = true; clearTimeout(rtBargeArmedTimer); rtBargeArmedTimer = null;
   if (rtScript) { try { rtScript.disconnect(); } catch (e) { } rtScript = null; }
   if (rtMicStream) { rtMicStream.getTracks().forEach(t => t.stop()); rtMicStream = null; }
   if (rtCtx) { try { rtCtx.close(); } catch (e) { } rtCtx = null; }
