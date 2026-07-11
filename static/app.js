@@ -100,9 +100,9 @@ let rtState = 'idle', rtAsstEl = null, rtAsstText = '', rtUserEl = null;
 
 function setRTState(s) {
   rtState = s;
-  const labels = { idle: '', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' };
+  const labels = { idle: 'click to start', connecting: 'Connecting…', listening: '', thinking: '', speaking: '' };
   const el = document.getElementById('rtState');
-  el.textContent = labels[s] || s;
+  el.textContent = s in labels ? labels[s] : s;
   el.className = 'rt-state ' + s;
   const wrap = document.getElementById('rtVizWrap');
   if (wrap) {

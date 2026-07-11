@@ -65,8 +65,7 @@ input, select, textarea { font-family: inherit; }
 .rt-gear { position: fixed; top: 30px; width: 47px; height: 47px; z-index: 12; color: var(--amber); padding: 0; outline: none; transition: transform .18s steps(5), color .15s; }
 .rt-gear svg { width: 100%; height: 100%; display: block; }
 .rt-gear:hover { filter: drop-shadow(0 0 7px var(--amber)); }
-.rt-gear-right { right: 34px; }
-.rt-gear-right:hover { color: var(--amber-soft); transform: rotate(45deg) scale(1.08); }
+
 
 /* end (top-left) — only shown while a session is running */
 .rt-end { left: 34px; color: var(--red); opacity: .9; transition: opacity .2s, color .2s, filter .2s; }
