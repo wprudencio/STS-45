@@ -39,17 +39,16 @@ services:
     restart: unless-stopped
 
   # Cloudflare Tunnel: exposes the app publicly without opening ports.
-  # Create a tunnel in Cloudflare Zero Trust, copy the token, and set it in .env
-  # as TUNNEL_TOKEN. The tunnel connects outbound to Cloudflare, so no inbound
-  # firewall rules are needed. WebSockets pass through automatically.
+  # Uses the free ephemeral trycloudflare.com tunnel, which auto-generates a
+  # random public URL. The URL is printed in the container logs.
+  # Connects outbound to Cloudflare, so no inbound firewall rules are needed.
+  # WebSockets pass through automatically.
   cloudflared:
     image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    command: tunnel --url http://nginx:7777
     restart: unless-stopped
     depends_on:
       - nginx
-    env_file:
-      - .env
 
 volumes:
   llama-models:
