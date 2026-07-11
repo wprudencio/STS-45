@@ -482,7 +482,7 @@ def synth_to_pcm16(app, cfg, text):
         from pathlib import Path
         from piper import PiperVoice
 
-        voice_name = cfg.get("voice", "en_US-amy-medium")
+        voice_name = cfg.get("voice", "en_US-lessac-medium")
         with app.tts_lock:
             if voice_name not in voice_map:
                 onnx_path = app._download_voice(voice_name)
@@ -524,7 +524,7 @@ async def _handler(ws):
             if t == "start":
                 sess.cfg = {
                     "lang": data.get("lang", _app.config.get("lang", "en")),
-                    "voice": data.get("voice", _app.config.get("voice", "en_US-amy-medium")),
+                    "voice": data.get("voice", _app.config.get("voice", "en_US-lessac-medium")),
                     "max_tokens": int(data.get("max_tokens", 512)),
                     "model": _app.config.get("model", "default"),
                     "api_url": (data.get("api_url") or "").strip() or _app.config.get("api_url", ""),

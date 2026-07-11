@@ -44,7 +44,7 @@ VOICE_DIR.mkdir(parents=True, exist_ok=True)
 
 config = {
     "lang": "en",
-    "voice": "en_US-amy-medium",
+    "voice": "en_US-lessac-medium",
     "api_url": LLAMA_API,
     "stt_api_url": STT_API,
     "model": "default",
@@ -133,7 +133,7 @@ def main():
     parser.add_argument("--api", default=os.environ.get("LLM_API", LLAMA_API), help="LLM API URL")
     parser.add_argument("--stt-api", default=os.environ.get("STT_API", STT_API), help="Parakeet STT server URL")
     parser.add_argument("--model", default="default", help="Model name")
-    parser.add_argument("--voice", default="en_US-amy-medium", help="Piper voice")
+    parser.add_argument("--voice", default="en_US-lessac-medium", help="Piper voice")
     parser.add_argument("--lang", default="en", help="Language")
     args = parser.parse_args()
 
