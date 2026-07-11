@@ -3,9 +3,17 @@ const BOOT = JSON.parse(document.getElementById('boot').textContent);
 const RT_WS_PORT = BOOT.ws_port;
 
 // ---------- Settings ----------
+// One-time migration: bump old default voice to Amy (medium).
+// Only fires once per browser; custom picks are preserved afterwards.
+if (parseInt(localStorage.getItem('sts45_voice_v') || '1', 10) < 2 &&
+    localStorage.getItem('sts45_voice') === 'en_US-lessac-medium') {
+  localStorage.setItem('sts45_voice', 'en_US-amy-medium');
+}
+localStorage.setItem('sts45_voice_v', '2');
+
 function loadSettings() {
   const g = (k, d) => localStorage.getItem(k) || d;
-  document.getElementById('voice').value = g('sts45_voice', 'en_US-lessac-medium');
+  document.getElementById('voice').value = g('sts45_voice', 'en_US-amy-medium');
   document.getElementById('lang').value = g('sts45_lang', 'en');
   const maxTokens = parseInt(g('sts45_max_tokens', '512'), 10);
   document.getElementById('maxTokens').value = maxTokens;
@@ -16,7 +24,7 @@ function loadSettings() {
 function readSettings() {
   return {
     lang: document.getElementById('lang').value,
-    voice: document.getElementById('voice').value,
+    voice: document.getElementById('voice').value || 'en_US-amy-medium',
     max_tokens: parseInt(document.getElementById('maxTokens').value, 10) || 512,
     sys_prompt: document.getElementById('sysPrompt').value,
   };
