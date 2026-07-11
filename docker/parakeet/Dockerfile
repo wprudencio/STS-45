@@ -3,7 +3,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl wget tar \
+        ca-certificates curl wget tar libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /parakeet
@@ -31,5 +31,5 @@ CMD ["/bin/bash", "-c", "\
             'https://huggingface.co/mudler/parakeet-cpp-gguf/resolve/main/tdt-1.1b-q5_k.gguf'; \
     fi; \
     echo 'Starting parakeet-server on :8081'; \
-    exec ./parakeet-server --model /models/$STT_MODEL_FILE --port 8081 \
+    exec ./parakeet-server --model /models/$STT_MODEL_FILE --host 0.0.0.0 --port 8081 \
 "]

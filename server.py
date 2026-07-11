@@ -51,6 +51,7 @@ config = {
 }
 
 RT_WS_PORT = 7778
+CLIENT_WS_PORT = int(os.environ.get("WS_CLIENT_PORT", 0))
 
 
 def _voice_url(voice_name):
@@ -90,7 +91,7 @@ def index():
         "index.html",
         default_api_url=config["api_url"],
         default_stt_api_url=config["stt_api_url"],
-        ws_port=RT_WS_PORT,
+        ws_port=CLIENT_WS_PORT or RT_WS_PORT,
     )
 
 

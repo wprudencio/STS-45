@@ -207,9 +207,12 @@ async function startRealtime() {
     showToast('Microphone unavailable (needs HTTPS or localhost)', 'error'); return;
   }
   setRTState('connecting');
-  // 0.0.0.0 isn't connectable; fall back to loopback so LAN/localhost/0.0.0.0 all work.
+  // Same port? Use relative URL (Docker/nginx single-port). Otherwise explicit WS port (local dev).
+  const pagePort = String(location.port || (location.protocol === 'https:' ? '443' : '80'));
   const wsHost = (!location.hostname || location.hostname === '0.0.0.0') ? '127.0.0.1' : location.hostname;
-  const url = 'ws://' + wsHost + ':' + RT_WS_PORT + '/ws';
+  const url = (pagePort === String(RT_WS_PORT))
+    ? (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws'
+    : 'ws://' + wsHost + ':' + RT_WS_PORT + '/ws';
   try { rtWS = new WebSocket(url); }
   catch (e) { showToast('WS error: ' + e.message, 'error'); stopRealtimeUI(''); return; }
   rtWS.binaryType = 'arraybuffer';
