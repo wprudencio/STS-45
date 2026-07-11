@@ -1,16 +1,10 @@
 // STS-45 Realtime
 const BOOT = JSON.parse(document.getElementById('boot').textContent);
-const DEFAULT_API_URL = BOOT.default_api_url;
-const DEFAULT_STT_API_URL = BOOT.default_stt_api_url;
 const RT_WS_PORT = BOOT.ws_port;
 
 // ---------- Settings ----------
 function loadSettings() {
   const g = (k, d) => localStorage.getItem(k) || d;
-  document.getElementById('apiUrl').value = g('sts45_api_url', DEFAULT_API_URL);
-  document.getElementById('apiKey').value = g('sts45_api_key', '');
-  document.getElementById('sttApiUrl').value = g('sts45_stt_api_url', DEFAULT_STT_API_URL);
-  document.getElementById('modelId').value = g('sts45_model', 'default');
   document.getElementById('voice').value = g('sts45_voice', 'en_US-lessac-medium');
   document.getElementById('lang').value = g('sts45_lang', 'en');
   const maxTokens = parseInt(g('sts45_max_tokens', '512'), 10);
@@ -24,11 +18,7 @@ function readSettings() {
     lang: document.getElementById('lang').value,
     voice: document.getElementById('voice').value,
     max_tokens: parseInt(document.getElementById('maxTokens').value, 10) || 512,
-    api_url: document.getElementById('apiUrl').value.trim(),
-    api_key: document.getElementById('apiKey').value.trim(),
-    model: document.getElementById('modelId').value.trim() || 'default',
     sys_prompt: document.getElementById('sysPrompt').value,
-    stt_api_url: document.getElementById('sttApiUrl').value.trim(),
   };
 }
 let settingsSaveTimer = null;
@@ -39,10 +29,6 @@ function persistSettingsDebounced() {
 function persistSettings() {
   const s = (k, v) => localStorage.setItem(k, v);
   const v = readSettings();
-  s('sts45_api_url', v.api_url);
-  s('sts45_api_key', v.api_key);
-  s('sts45_stt_api_url', v.stt_api_url);
-  s('sts45_model', v.model);
   s('sts45_voice', v.voice);
   s('sts45_lang', v.lang);
   s('sts45_max_tokens', v.max_tokens);
@@ -67,7 +53,7 @@ window.toggleSettings = function () {
   document.getElementById('settingsPanel').classList.toggle('hidden');
 };
 document.querySelectorAll('input, select, textarea').forEach(el => {
-  if (el.id && ['voice', 'lang', 'maxTokens', 'apiUrl', 'apiKey', 'modelId', 'sttApiUrl', 'sysPrompt'].includes(el.id)) {
+  if (el.id && ['voice', 'lang', 'maxTokens', 'sysPrompt'].includes(el.id)) {
     el.addEventListener('input', persistSettingsDebounced);
     el.addEventListener('change', persistSettingsDebounced);
   }

@@ -76,10 +76,6 @@
       <div class="slider-row"><div class="slider-label"><span class="slider-name">Max tokens</span><span class="slider-val" id="maxTokensVal">512</span></div><input type="range" id="maxTokens" min="64" max="4096" step="64" value="512" oninput="document.getElementById('maxTokensVal').textContent=this.value; updateSlider(this)"></div>
       <hr class="divider">
       <div class="field"><div class="field-lbl">System prompt</div><textarea class="field-area" id="sysPrompt" rows="3" placeholder="Instructions for the assistant…"></textarea></div>
-      <div class="field"><div class="field-lbl">LLM API URL</div><input class="field-input" type="text" id="apiUrl" placeholder="http://127.0.0.1:8080/v1/chat/completions"></div>
-      <div class="field"><div class="field-lbl">LLM API key</div><input class="field-input" type="password" id="apiKey" placeholder="(leave empty for local)"></div>
-      <div class="field"><div class="field-lbl">LLM model</div><input class="field-input" type="text" id="modelId" placeholder="default"></div>
-      <div class="field"><div class="field-lbl">STT API URL (parakeet.cpp)</div><input class="field-input" type="text" id="sttApiUrl" placeholder="http://localhost:8081"></div>
     </div>
     <div class="settings-foot">
       <span class="settings-hint" id="settingsHint">saved automatically</span>
@@ -87,8 +83,6 @@
   </div>
 
   <script id="boot" type="application/json">{
-    "default_api_url": "{{ default_api_url }}",
-    "default_stt_api_url": "{{ default_stt_api_url }}",
     "ws_port": {{ ws_port }}
   }</script>
   <script src="/static/app.js"></script>

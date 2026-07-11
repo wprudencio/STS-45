@@ -89,8 +89,6 @@ def _download_voice(voice_name):
 def index():
     return render_template(
         "index.html",
-        default_api_url=config["api_url"],
-        default_stt_api_url=config["stt_api_url"],
         ws_port=CLIENT_WS_PORT or RT_WS_PORT,
     )
 
