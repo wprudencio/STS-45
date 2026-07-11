@@ -230,12 +230,20 @@ async function startRealtime() {
     showToast('Microphone unavailable (needs HTTPS or localhost)', 'error'); return;
   }
   setRTState('connecting');
-  // Same port? Use relative URL (Docker/nginx single-port). Otherwise explicit WS port (local dev).
-  const pagePort = String(location.port || (location.protocol === 'https:' ? '443' : '80'));
-  const wsHost = (!location.hostname || location.hostname === '0.0.0.0') ? '127.0.0.1' : location.hostname;
-  const url = (pagePort === String(RT_WS_PORT))
-    ? (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws'
-    : 'ws://' + wsHost + ':' + RT_WS_PORT + '/ws';
+  // WebSocket URL:
+  // - HTTPS (Cloudflare Tunnel / reverse proxy) -> wss://host/ws (same host/port).
+  // - Same port as page (Docker nginx single-port) -> ws://host:7777/ws.
+  // - Different port (local dev run.sh) -> explicit ws://host:7778/ws.
+  const isSecure = location.protocol === 'https:';
+  const pagePort = String(location.port || (isSecure ? '443' : '80'));
+  const samePort = pagePort === String(RT_WS_PORT);
+  let url;
+  if (isSecure || samePort) {
+    url = (isSecure ? 'wss:' : 'ws:') + '//' + location.host + '/ws';
+  } else {
+    const wsHost = (!location.hostname || location.hostname === '0.0.0.0') ? '127.0.0.1' : location.hostname;
+    url = 'ws://' + wsHost + ':' + RT_WS_PORT + '/ws';
+  }
   try { rtWS = new WebSocket(url); }
   catch (e) { showToast('WS error: ' + e.message, 'error'); stopRealtimeUI(''); return; }
   rtWS.binaryType = 'arraybuffer';
