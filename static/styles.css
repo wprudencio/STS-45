@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════
-   SUPERTONIC REALTIME — minimal amber CRT pixel UI
+   STS-45 REALTIME — minimal amber CRT pixel UI
    ══════════════════════════════════════════════════════════ */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; border-radius: 0; }
@@ -51,7 +51,7 @@ input, select, textarea { font-family: inherit; }
 .rt-overlay {
   position: relative; z-index: 2; width: 100%; height: 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 16px; padding: 28px; pointer-events: none;
+  gap: 30px; padding: 28px; pointer-events: none;
 }
 .rt-overlay > * { pointer-events: auto; }
 
@@ -65,8 +65,7 @@ input, select, textarea { font-family: inherit; }
 .rt-gear { position: fixed; top: 30px; width: 47px; height: 47px; z-index: 12; color: var(--amber); padding: 0; outline: none; transition: transform .18s steps(5), color .15s; }
 .rt-gear svg { width: 100%; height: 100%; display: block; }
 .rt-gear:hover { filter: drop-shadow(0 0 7px var(--amber)); }
-.rt-gear-right { right: 34px; }
-.rt-gear-right:hover { color: var(--amber-soft); transform: rotate(45deg) scale(1.08); }
+
 
 /* end (top-left) — only shown while a session is running */
 .rt-end { left: 34px; color: var(--red); opacity: .9; transition: opacity .2s, color .2s, filter .2s; }
@@ -88,8 +87,8 @@ input, select, textarea { font-family: inherit; }
 @keyframes ringListen { from{ transform:scale(1) rotate(0deg)} to{ transform:scale(1.2) rotate(30deg)} }
 .rt-viz-wrap.thinking .rt-ring1 { animation: ringThink 1.6s steps(10) infinite; }
 @keyframes ringThink { 0%{transform:scale(1) rotate(0deg);opacity:.2} 50%{transform:scale(1.4) rotate(180deg);opacity:.1} 100%{transform:scale(1) rotate(360deg);opacity:.2} }
-.rt-viz-wrap.speaking .rt-ring1 { animation: ringSpeak .4s steps(4) infinite alternate; }
-@keyframes ringSpeak { from{ transform:scale(1.2) rotate(0deg); opacity:.25} to{ transform:scale(1.8) rotate(45deg); opacity:.08} }
+.rt-viz-wrap.speaking .rt-ring1 { animation: ringSpeak .95s ease-in-out infinite; }
+@keyframes ringSpeak { 0%,100%{ transform:scale(1); opacity:.22} 50%{ transform:scale(1.28); opacity:.6; box-shadow: 0 0 28px rgba(255,170,0,.35)} }
 .rt-viz-wrap.running .rt-ring1 { animation: ringIdle 3.6s ease-in-out infinite; }
 
 /* outer pulse ring — JS energy driven via --pout */
@@ -99,7 +98,7 @@ input, select, textarea { font-family: inherit; }
   width: 106px; height: 106px; border-radius: 50%;
   border: 5px solid var(--amber);
   box-shadow: 0 0 18px rgba(255,170,0,.45), inset 0 0 14px rgba(255,170,0,.15);
-  transform: scale(calc(1 + var(--pout) * 1.6));
+  transform: scale(calc(1 + var(--pout) * 0.4));
   opacity: .85;
   will-change: transform, box-shadow;
   animation: breathe 2s ease-in-out infinite;
@@ -113,18 +112,22 @@ input, select, textarea { font-family: inherit; }
   width: 34px; height: 34px; border-radius: 50%;
   background: var(--amber);
   box-shadow: 0 0 0 6px var(--bg), 0 0 24px var(--amber);
-  transform: scale(calc(1 + var(--pin) * 2.4));
+  transform: scale(calc(1 + var(--pin) * 1.4));
   will-change: transform, box-shadow;
 }
 .rt-viz-wrap.thinking .rt-pulse-dot { background: var(--amber-soft); }
-.rt-viz-wrap.speaking .rt-pulse-dot { background: var(--cream); }
+.rt-viz-wrap.speaking .rt-pulse-dot {
+  background: var(--cream);
+  animation: dotSpeak .95s ease-in-out infinite;
+}
+@keyframes dotSpeak { 0%,100%{ transform:scale(1); box-shadow: 0 0 24px rgba(255,232,184,.4)} 50%{ transform:scale(1.55); box-shadow: 0 0 42px rgba(255,232,184,.75)} }
 
 /* --- State label --- */
 .rt-state {
   font-size: 43px; font-weight: 600;
   letter-spacing: .22em; text-transform: uppercase; color: var(--amber-dim);
   text-shadow: 0 0 10px rgba(255,170,0,.3); transition: color .25s, text-shadow .25s;
-  min-height: 1em; margin-top: 4px;
+  min-height: 1em; margin-top: 6px; margin-bottom: -8px;
 }
 .rt-state.listening { color: var(--amber); text-shadow: 0 0 10px rgba(255,170,0,.5); }
 .rt-state.thinking { color: var(--amber-soft); text-shadow: 0 0 10px rgba(255,204,68,.6); }
@@ -150,7 +153,7 @@ input, select, textarea { font-family: inherit; }
 .rt-line.live .rt-text::after { content: '▌'; color: var(--amber); text-shadow: 0 0 7px rgba(255,170,0,.6); animation: blink .6s steps(2) infinite; margin-left: 2px; }
 @keyframes blink { 0%,100%{ opacity:1 } 50%{ opacity:0 } }
 
-.rt-filler { height: 2px; }
+.rt-filler { height: 18px; }
 
 /* --- Settings drawer --- */
 .settings-panel {

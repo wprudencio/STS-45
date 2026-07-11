@@ -1,11 +1,11 @@
 """
-Realtime voice conversation mode for Supertonic.
+Realtime voice conversation mode for STS-45.
 
 A small asyncio WebSocket server (run in a daemon thread alongside the Flask
 app) that mirrors the Hugging Face "hf-realtime-voice" speech-to-speech loop,
 but fully local:
 
-    you speak -> VAD -> parakeet STT -> llama.cpp LLM -> Supertonic TTS -> orb replies
+    you speak -> VAD -> parakeet STT -> llama.cpp LLM -> Piper TTS -> orb replies
 
 The browser streams 16 kHz PCM16 mono over the socket; the server runs an
 energy VAD to find utterance boundaries, transcribes each utterance, streams
@@ -46,11 +46,20 @@ from websockets.asyncio.server import serve
 # --- Voice activity detection (mirrors the browser PTT thresholds) ----------
 SR_IN = 16000
 VAD_RMS = 0.022          # voice activity detection threshold (was 0.012)
-BARGE_RMS = 0.05         # higher threshold to resist speaker bleed
+BARGE_RMS = 0.030         # barge-in threshold: lower = easier to interrupt (was 0.05)
 SILENCE_MS = 650
 MIN_UTT = int(0.30 * SR_IN)        # ~0.3s minimum utterance
 MAX_UTT = int(12 * SR_IN)          # force-split an over-long run
-BARGE_CONFIRM = 2                  # consecutive voiced frames -> barge-in (~256ms)
+BARGE_CONFIRM = 2                  # consecutive voiced frames -> barge-in (~256ms, guards against clicks)
+
+# --- Memory safety: bounded history + queues ------------------------------
+# The conversation history is sent to the LLM every turn, so unbounded growth
+# makes each response slower and eats memory. We keep the system prompt plus a
+# sliding window of recent turns; old turns are dropped. Tune HISTORY_MAX_TURNS
+# (= number of user+assistant pairs retained) to taste.
+HISTORY_MAX_TURNS = 12              # pairs of (user, assistant) kept
+OUT_Q_MAX = 64                     # backpressure: don't queue infinite audio
+PARTIAL_STT_TASKS = 1               # at most one in-flight partial transcription
 
 # --- Streaming TTS chunking -------------------------------------------------
 # We synthesize per clause so the first audio appears early and barge-in stays
@@ -141,15 +150,28 @@ class _Session:
         self.cancel = False
         self.closed = False
 
-        self.out_q = asyncio.Queue()  # str(json) or bytes; drained by sender
+        self.out_q = asyncio.Queue(maxsize=OUT_Q_MAX)  # str(json) or bytes; drained by sender
         self.turn_q = asyncio.Queue()  # utterance bytes; drained by turn_loop
+        self._partial_task = None      # in-flight partial STT task (cancellable)
+        self._partial_seq = 0          # monotonically increasing partial id
 
     # --- output (thread-safe enqueue onto the loop) -------------------------
     def emit(self, item):
         if self.closed:
             return
         try:
-            self.loop.call_soon_threadsafe(self.out_q.put_nowait, item)
+            # put_nowait on a bounded queue; if the client fell behind we drop
+            # audio (keeps latency bounded) rather than grow memory forever.
+            self.out_q.put_nowait(item)
+        except asyncio.QueueFull:
+            # Drop oldest to make room for newest state messages; audio frames
+            # are dropped outright (a stuck client misses a little audio, not a
+            # whole turn).
+            try:
+                self.out_q.get_nowait()
+                self.out_q.put_nowait(item)
+            except Exception:
+                pass
         except RuntimeError:
             pass
 
@@ -227,7 +249,10 @@ class _Session:
         n = len(self.utt) // 2
         silence = (now - self.last_voice) * 1000
 
-        # Periodic partial STT (only during normal listening, not barge)
+        # Periodic partial STT (only during normal listening, not barge).
+        # Bounded: at most PARTIAL_STT_TASKS in flight; we cancel the previous
+        # one before starting a new one so slow STT can't pile up tasks (and the
+        # utt_snap byte buffers they hold) in memory.
         if not self.barging:
             partial_interval = 0.50  # seconds
             partial_min_samples = int(0.5 * SR_IN)
@@ -236,21 +261,32 @@ class _Session:
                     and silence < SILENCE_MS:
                 self.last_partial_time = now
                 self.last_partial_samples = n
+                # cancel any still-running partial so we never have more than
+                # PARTIAL_STT_TASKS alive.
+                if self._partial_task is not None and not self._partial_task.done():
+                    self._partial_task.cancel()
                 utt_snap = bytes(self.utt)
+                seq = self._partial_seq + 1
+                self._partial_seq = seq
                 lang = self.cfg.get("lang", "en")
                 stt_api = self.cfg.get("stt_api_url", "")
-                async def _send_partial():
+                async def _send_partial(my_seq=seq, snap=utt_snap):
                     try:
                         loop = asyncio.get_running_loop()
                         text = await loop.run_in_executor(
                             None, transcribe_wav,
-                            int16_to_wav_bytes(utt_snap, SR_IN), "partial.wav", lang, stt_api
+                            int16_to_wav_bytes(snap, SR_IN), "partial.wav", lang, stt_api
                         )
+                        # discard stale results (a newer partial superseded us)
+                        if my_seq != self._partial_seq:
+                            return
                         if text and not self.cancel and not self.turn_busy:
                             self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
+                    except asyncio.CancelledError:
+                        pass
                     except Exception:
                         pass
-                asyncio.create_task(_send_partial())
+                self._partial_task = asyncio.create_task(_send_partial())
 
         # --- utterance complete? submit to turn queue ---
         if n >= MIN_UTT and (silence >= SILENCE_MS or n >= MAX_UTT):
@@ -324,6 +360,20 @@ class _Session:
             self.send_json({"type": "transcript", "role": "assistant", "text": "", "final": True})
             if acc.strip():
                 self.history.append({"role": "assistant", "content": acc})
+                self._prune_history()
+
+    def _prune_history(self):
+        """Keep the system prompt + the most recent HISTORY_MAX_TURNS pairs.
+        Prevents the LLM context (and memory) from growing every turn, which is
+        the main cause of the slowdown that builds over a long session."""
+        if not self.history:
+            return
+        # find the system prompt (always index 0 on start) and keep it; cap the
+        # rest to 2 * HISTORY_MAX_TURNS messages (user+assistant pairs).
+        sys_prefix = 1 if self.history[0].get("role") == "system" else 0
+        max_msgs = sys_prefix + 2 * HISTORY_MAX_TURNS
+        if len(self.history) > max_msgs:
+            self.history = self.history[:sys_prefix] + self.history[-(max_msgs - sys_prefix):]
 
     def _speak(self, text):
         for chunk in _chunk_text(text):
@@ -445,59 +495,69 @@ def stream_llm(history, cfg):
         print(f"[realtime] LLM request failed: {e}", flush=True)
         yield ("error", f"LLM request failed: {e}")
         return
-    has_content = False
-    has_reasoning = False
-    for line in r.iter_lines(decode_unicode=True):
-        if not line or not line.startswith("data: "):
-            continue
-        d = line[6:]
-        if d.strip() == "[DONE]":
-            break
+    # Important: must close the streaming response even when the consumer
+    # breaks early (barge-in). Without this the underlying socket stays open
+    # and urllib3 connections leak, eventually exhausting the pool and making
+    # every request slower/hang — the "gets slow over time" symptom.
+    try:
+        has_content = False
+        has_reasoning = False
+        for line in r.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+            d = line[6:]
+            if d.strip() == "[DONE]":
+                break
+            try:
+                chunk = json.loads(d)
+            except json.JSONDecodeError:
+                continue
+            choices = chunk.get("choices", [])
+            if not choices:
+                continue
+            delta = choices[0].get("delta", {})
+            reasoning = delta.get("reasoning_content")
+            content = delta.get("content")
+            if reasoning and not has_content:
+                has_reasoning = True
+                yield ("reasoning", reasoning)
+            elif content:
+                has_content = True
+                yield ("text", content)
+        if not has_content and not has_reasoning:
+            yield ("error", "LLM returned no content (check that llama-server is running and the API URL is correct).")
+    finally:
+        # runs on normal exit, break, or generator close (barge-in/teardown)
         try:
-            chunk = json.loads(d)
-        except json.JSONDecodeError:
-            continue
-        choices = chunk.get("choices", [])
-        if not choices:
-            continue
-        delta = choices[0].get("delta", {})
-        reasoning = delta.get("reasoning_content")
-        content = delta.get("content")
-        if reasoning and not has_content:
-            has_reasoning = True
-            yield ("reasoning", reasoning)
-        elif content:
-            has_content = True
-            yield ("text", content)
-    if not has_content and not has_reasoning:
-        yield ("error", "LLM returned no content (check that llama-server is running and the API URL is correct).")
+            r.close()
+        except Exception:
+            pass
 
 
 def synth_to_pcm16(app, cfg, text):
-    """Synthesize `text` with Kokoro TTS; return int16 PCM numpy array."""
-    pipelines = getattr(app, "tts", None)
-    if not pipelines:
+    """Synthesize `text` with Piper TTS; return int16 PCM numpy array."""
+    voice_map = getattr(app, "tts", None)
+    if not voice_map:
         return None
     try:
-        lang = cfg.get("lang", "en")
-        lang_code = getattr(app, "LANG_MAP", {}).get(lang, "a")
+        from pathlib import Path
+        from piper import PiperVoice
+
+        voice_name = cfg.get("voice", "en_US-lessac-medium")
         with app.tts_lock:
-            if lang_code not in pipelines:
-                from kokoro import KPipeline
-                pipelines[lang_code] = KPipeline(lang_code=lang_code)
-            pipeline = pipelines[lang_code]
-        voice = cfg.get("voice", "af_heart")
-        speed = float(cfg.get("speed", 1.0))
-        with app.tts_lock:
-            gen = pipeline(text, voice=voice, speed=speed)
-            chunks = []
-            for _gs, _ps, audio in gen:
-                chunks.append(audio.squeeze().cpu().numpy())
-        if not chunks:
-            return None
-        w = np.concatenate(chunks).astype(np.float32)
-        w = np.clip(w, -1.0, 1.0)
-        return (w * 32767).astype(np.int16)
+            if voice_name not in voice_map:
+                onnx_path = app._download_voice(voice_name)
+                if onnx_path is None:
+                    return None
+                voice = PiperVoice.load(str(onnx_path))
+                import json
+                cfg_json = json.loads(Path(str(onnx_path) + ".json").read_text())
+                sr = cfg_json.get("audio", {}).get("sample_rate", 22050)
+                voice_map[voice_name] = (voice, sr)
+            voice, sr = voice_map[voice_name]
+        gen = voice.synthesize(text)
+        pcm = b"".join(chunk.audio_int16_bytes for chunk in gen)
+        return np.frombuffer(pcm, dtype=np.int16)
     except Exception as e:
         print(f"[realtime] TTS synth failed: {e}", flush=True)
         return None
@@ -525,8 +585,7 @@ async def _handler(ws):
             if t == "start":
                 sess.cfg = {
                     "lang": data.get("lang", _app.config.get("lang", "en")),
-                    "voice": data.get("voice", _app.config.get("voice", "af_heart")),
-                    "speed": data.get("speed", _app.config.get("speed", 1.0)),
+                    "voice": data.get("voice", _app.config.get("voice", "en_US-lessac-medium")),
                     "max_tokens": int(data.get("max_tokens", 512)),
                     "model": _app.config.get("model", "default"),
                     "api_url": (data.get("api_url") or "").strip() or _app.config.get("api_url", ""),
@@ -539,12 +598,21 @@ async def _handler(ws):
                 if not tts_dict:
                     sess.send_json({"type": "error", "text": "TTS model still loading — retrying…"})
                     continue
-                sess.tts_sr = 24000  # Kokoro sample rate
+                sess.tts_sr = 22050  # Piper sample rate
                 sess.cancel = False
                 sess.set_state("listening")
                 await ws.send(json.dumps({"type": "ready", "sampleRate": sess.tts_sr}))
             elif t == "barge":
-                sess.cancel = True
+                # Client-side instant barge: stop playback locally + tell server
+                # to abandon the current turn AND capture the interrupting speech.
+                if sess.turn_busy and not sess.barging:
+                    sess.barging = True
+                    sess.cancel = True
+                    sess.barge_count = 0
+                    sess.utt = bytearray()
+                    sess.last_voice = time.monotonic()
+                    sess.send_json({"type": "clear"})
+                    sess.set_state("listening")
             elif t == "stop":
                 break
     except Exception:
@@ -579,6 +647,6 @@ def start(host, port, app_module):
         asyncio.set_event_loop(loop)
         loop.run_until_complete(_serve())
 
-    t = threading.Thread(target=_run, daemon=True, name="supertonic-realtime")
+    t = threading.Thread(target=_run, daemon=True, name="sts45-realtime")
     t.start()
     return t

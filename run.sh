@@ -53,7 +53,7 @@ if ! kill -0 $STT_PID 2>/dev/null; then
 fi
 
 # ---------- Realtime server (Flask + WS) ----------
-echo "🚀 Starting Realtime Orb (Kokoro TTS)..."
+echo "🚀 Starting STS-45 (Piper TTS)..."
 echo "   Open: http://$CHAT_HOST:$CHAT_PORT  (also: http://localhost:$CHAT_PORT)"
 echo "   WS:   ws://$CHAT_HOST:$((CHAT_PORT + 1))/ws"
 echo "   STT:  http://localhost:$STT_PORT"

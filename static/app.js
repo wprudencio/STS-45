@@ -1,39 +1,24 @@
-// Supertonic Realtime Lite
+// STS-45 Realtime
 const BOOT = JSON.parse(document.getElementById('boot').textContent);
-const DEFAULT_API_URL = BOOT.default_api_url;
-const DEFAULT_STT_API_URL = BOOT.default_stt_api_url;
 const RT_WS_PORT = BOOT.ws_port;
 
 // ---------- Settings ----------
 function loadSettings() {
   const g = (k, d) => localStorage.getItem(k) || d;
-  document.getElementById('apiUrl').value = g('supertonic_api_url', DEFAULT_API_URL);
-  document.getElementById('apiKey').value = g('supertonic_api_key', '');
-  document.getElementById('sttApiUrl').value = g('supertonic_stt_api_url', DEFAULT_STT_API_URL);
-  document.getElementById('modelId').value = g('supertonic_model', 'default');
-  document.getElementById('voice').value = g('supertonic_voice', 'af_heart');
-  document.getElementById('lang').value = g('supertonic_lang', 'en');
-  const speed = parseFloat(g('supertonic_speed', '1.0'));
-  document.getElementById('speed').value = speed;
-  document.getElementById('speedVal').textContent = speed.toFixed(2);
-  updateSlider(document.getElementById('speed'));
-  const maxTokens = parseInt(g('supertonic_max_tokens', '512'), 10);
+  document.getElementById('voice').value = g('sts45_voice', 'en_US-lessac-medium');
+  document.getElementById('lang').value = g('sts45_lang', 'en');
+  const maxTokens = parseInt(g('sts45_max_tokens', '512'), 10);
   document.getElementById('maxTokens').value = maxTokens;
   document.getElementById('maxTokensVal').textContent = maxTokens;
   updateSlider(document.getElementById('maxTokens'));
-  document.getElementById('sysPrompt').value = g('supertonic_sys_prompt', '');
+  document.getElementById('sysPrompt').value = g('sts45_sys_prompt', '');
 }
 function readSettings() {
   return {
     lang: document.getElementById('lang').value,
     voice: document.getElementById('voice').value,
-    speed: parseFloat(document.getElementById('speed').value),
     max_tokens: parseInt(document.getElementById('maxTokens').value, 10) || 512,
-    api_url: document.getElementById('apiUrl').value.trim(),
-    api_key: document.getElementById('apiKey').value.trim(),
-    model: document.getElementById('modelId').value.trim() || 'default',
     sys_prompt: document.getElementById('sysPrompt').value,
-    stt_api_url: document.getElementById('sttApiUrl').value.trim(),
   };
 }
 let settingsSaveTimer = null;
@@ -44,15 +29,10 @@ function persistSettingsDebounced() {
 function persistSettings() {
   const s = (k, v) => localStorage.setItem(k, v);
   const v = readSettings();
-  s('supertonic_api_url', v.api_url);
-  s('supertonic_api_key', v.api_key);
-  s('supertonic_stt_api_url', v.stt_api_url);
-  s('supertonic_model', v.model);
-  s('supertonic_voice', v.voice);
-  s('supertonic_lang', v.lang);
-  s('supertonic_speed', v.speed);
-  s('supertonic_max_tokens', v.max_tokens);
-  s('supertonic_sys_prompt', v.sys_prompt);
+  s('sts45_voice', v.voice);
+  s('sts45_lang', v.lang);
+  s('sts45_max_tokens', v.max_tokens);
+  s('sts45_sys_prompt', v.sys_prompt);
   try { fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) }); } catch (e) { }
   flashHint();
 }
@@ -73,7 +53,7 @@ window.toggleSettings = function () {
   document.getElementById('settingsPanel').classList.toggle('hidden');
 };
 document.querySelectorAll('input, select, textarea').forEach(el => {
-  if (el.id && ['voice', 'lang', 'speed', 'maxTokens', 'apiUrl', 'apiKey', 'modelId', 'sttApiUrl', 'sysPrompt'].includes(el.id)) {
+  if (el.id && ['voice', 'lang', 'maxTokens', 'sysPrompt'].includes(el.id)) {
     el.addEventListener('input', persistSettingsDebounced);
     el.addEventListener('change', persistSettingsDebounced);
   }
@@ -109,29 +89,58 @@ function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp
 let rtWS = null, rtCtx = null, rtMicStream = null, rtScript = null, rtRunning = false;
 let rtPlayCtx = null, rtTTSsr = 24000, rtPlaySources = [], rtPlayTime = 0, rtAudioMuted = false;
 let rtState = 'idle', rtAsstEl = null, rtAsstText = '', rtUserEl = null;
+const RT_MAX_LINES = 40;  // cap transcript DOM growth; old lines trimmed to keep long sessions fast
+// client-side barge-in: stop AI playback the moment the user starts talking,
+// without waiting for the server round-trip.
+let rtBargeCount = 0, rtBargeArmed = true, rtBargeArmedTimer = null;
+const RT_BARGE_RMS = 0.030;     // mic input energy that counts as "user talking"
+const RT_BARGE_CONFIRM = 2;     // consecutive voiced 128ms frames -> trigger
+const RT_BARGE_COOLDOWN = 500;  // ms before another barge can fire
+
+function rtBarge() {
+  // stop local playback instantly and tell server to drop the current turn
+  if (!rtBargeArmed) return;
+  rtBargeArmed = false;
+  clearTimeout(rtBargeArmedTimer);
+  rtBargeArmedTimer = setTimeout(() => { rtBargeArmed = true; rtBargeCount = 0; }, RT_BARGE_COOLDOWN);
+  rtClearPlayback();
+  if (rtWS && rtWS.readyState === 1) {
+    try { rtWS.send(JSON.stringify({ type: 'barge' })); } catch (e) { }
+  }
+  setRTState('listening');
+}
 
 function setRTState(s) {
   rtState = s;
-  const labels = { idle: '', connecting: 'Connecting…', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' };
+  const labels = { idle: 'click to start', connecting: 'Connecting…', listening: '', thinking: '', speaking: '' };
   const el = document.getElementById('rtState');
-  el.textContent = labels[s] || s;
+  el.textContent = s in labels ? labels[s] : s;
   el.className = 'rt-state ' + s;
-  const wrap = document.getElementById('rtVizWrap');
-  if (wrap) {
-    wrap.className = 'rt-viz-wrap'
-      + (s === 'listening' ? ' listening' : '')
-      + (s === 'thinking' ? ' thinking' : '')
-      + (s === 'speaking' ? ' speaking' : '')
-      + (rtRunning ? ' running' : '');
-  }
   if (s === 'speaking' || s === 'listening') rtAudioMuted = false;
   document.getElementById('rtEndBtn').classList.toggle('hidden', !rtRunning);
+  rtUpdateVizClasses();
+}
+
+function rtUpdateVizClasses() {
+  // The server sends state='speaking' while it generates/sends TTS chunks, but
+  // the client queues those chunks ahead via rtPlayTime. We want the orb to
+  // keep pulsing until playback actually finishes, so combine server state
+  // with whether any audio sources are still active/scheduled.
+  const wrap = document.getElementById('rtVizWrap');
+  if (!wrap) return;
+  const audioPlaying = rtPlaySources.length > 0;
+  wrap.className = 'rt-viz-wrap'
+    + (rtState === 'listening' && !audioPlaying ? ' listening' : '')
+    + (rtState === 'thinking' && !audioPlaying ? ' thinking' : '')
+    + (rtState === 'speaking' || audioPlaying ? ' speaking' : '')
+    + (rtRunning ? ' running' : '');
 }
 
 function rtSendStart() { if (rtWS && rtWS.readyState === 1) rtWS.send(JSON.stringify(Object.assign({ type: 'start' }, readSettings()))); }
 
 function rtAppendUser(text) {
   const t = document.getElementById('rtTranscript');
+  rtTrimTranscript(t);
   if (rtUserEl) {
     rtUserEl.querySelector('.rt-text').textContent = text;
     rtUserEl.classList.remove('live');
@@ -146,6 +155,7 @@ function rtAppendUser(text) {
 }
 function rtUpdateUserPartial(text) {
   const t = document.getElementById('rtTranscript');
+  rtTrimTranscript(t);
   if (!rtUserEl) {
     rtUserEl = document.createElement('div'); rtUserEl.className = 'rt-line user live';
     rtUserEl.innerHTML = '<span class="rt-role">You</span><span class="rt-text"></span>';
@@ -157,6 +167,7 @@ function rtUpdateUserPartial(text) {
 function rtAppendAssistantDelta(tok) {
   const t = document.getElementById('rtTranscript');
   if (!rtAsstEl) {
+    rtTrimTranscript(t);
     rtAsstEl = document.createElement('div'); rtAsstEl.className = 'rt-line assistant live';
     rtAsstEl.innerHTML = '<span class="rt-role">Assistant</span><span class="rt-text"></span>';
     t.appendChild(rtAsstEl); rtAsstText = '';
@@ -165,11 +176,17 @@ function rtAppendAssistantDelta(tok) {
   t.scrollTop = t.scrollHeight;
 }
 function rtFinalizeAssistant() { if (rtAsstEl) { rtAsstEl.classList.remove('live'); rtAsstEl = null; rtAsstText = ''; } }
+function rtTrimTranscript(t) {
+  // drop the oldest lines once we exceed the cap; keeps the DOM small so a
+  // long session never turns into a giant, slow-to-paint/scroll tree.
+  while (t.childElementCount > RT_MAX_LINES) t.removeChild(t.firstElementChild);
+}
 
 function rtClearPlayback() {
   rtAudioMuted = true;
   rtPlaySources.forEach(s => { try { s.stop(); } catch (e) { } });
   rtPlaySources = []; if (rtPlayCtx) rtPlayTime = rtPlayCtx.currentTime;
+  rtUpdateVizClasses();
 }
 
 function onRTAudio(buf) {
@@ -179,14 +196,14 @@ function onRTAudio(buf) {
   const i16 = new Int16Array(buf); const f32 = new Float32Array(i16.length);
   let sumSq = 0;
   for (let i = 0; i < i16.length; i++) { const s = i16[i] / 32768; f32[i] = s; sumSq += s * s; }
-  rtPulsePushOut(Math.min(1, Math.sqrt(sumSq / i16.length) * 9));
+  rtPulsePushOut(Math.min(0.7, Math.sqrt(sumSq / i16.length) * 5));
   const ab = rtPlayCtx.createBuffer(1, f32.length, rtTTSsr);
   ab.copyToChannel(f32, 0);
   const src = rtPlayCtx.createBufferSource(); src.buffer = ab; src.connect(rtPlayCtx.destination);
   const now = rtPlayCtx.currentTime;
   if (rtPlayTime < now) rtPlayTime = now + 0.02;
   src.start(rtPlayTime); rtPlayTime += ab.duration; rtPlaySources.push(src);
-  src.onended = () => { rtPlaySources = rtPlaySources.filter(s => s !== src); };
+  src.onended = () => { rtPlaySources = rtPlaySources.filter(s => s !== src); rtUpdateVizClasses(); };
 }
 
 function onRTMsg(m) {
@@ -213,9 +230,12 @@ async function startRealtime() {
     showToast('Microphone unavailable (needs HTTPS or localhost)', 'error'); return;
   }
   setRTState('connecting');
-  // 0.0.0.0 isn't connectable; fall back to loopback so LAN/localhost/0.0.0.0 all work.
+  // Same port? Use relative URL (Docker/nginx single-port). Otherwise explicit WS port (local dev).
+  const pagePort = String(location.port || (location.protocol === 'https:' ? '443' : '80'));
   const wsHost = (!location.hostname || location.hostname === '0.0.0.0') ? '127.0.0.1' : location.hostname;
-  const url = 'ws://' + wsHost + ':' + RT_WS_PORT + '/ws';
+  const url = (pagePort === String(RT_WS_PORT))
+    ? (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws'
+    : 'ws://' + wsHost + ':' + RT_WS_PORT + '/ws';
   try { rtWS = new WebSocket(url); }
   catch (e) { showToast('WS error: ' + e.message, 'error'); stopRealtimeUI(''); return; }
   rtWS.binaryType = 'arraybuffer';
@@ -233,7 +253,20 @@ async function startRealtime() {
     const d = e.inputBuffer.getChannelData(0); const buf = new Int16Array(d.length);
     let sumSq = 0;
     for (let i = 0; i < d.length; i++) { let s = Math.max(-1, Math.min(1, d[i])); buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; sumSq += s * s; }
-    rtPulsePushIn(Math.min(1, Math.sqrt(sumSq / d.length) * 6));
+    const inRms = Math.sqrt(sumSq / d.length);
+    rtPulsePushIn(Math.min(1, inRms * 6));
+    // client-side instant barge-in: while the AI is speaking or thinking, the
+    // user's voice (echo-cancelled by the browser) stops playback immediately.
+    if (rtBargeArmed && (rtState === 'speaking' || rtState === 'thinking')) {
+      if (inRms >= RT_BARGE_RMS) {
+        rtBargeCount++;
+        if (rtBargeCount >= RT_BARGE_CONFIRM) rtBarge();
+      } else {
+        rtBargeCount = 0;
+      }
+    } else {
+      rtBargeCount = 0;
+    }
     rtWS.send(buf.buffer);
   };
   src.connect(rtScript); rtScript.connect(rtCtx.destination);
@@ -247,6 +280,7 @@ async function startRealtime() {
 
 function stopRealtimeUI(msg) {
   rtRunning = false;
+  rtBargeCount = 0; rtBargeArmed = true; clearTimeout(rtBargeArmedTimer); rtBargeArmedTimer = null;
   if (rtScript) { try { rtScript.disconnect(); } catch (e) { } rtScript = null; }
   if (rtMicStream) { rtMicStream.getTracks().forEach(t => t.stop()); rtMicStream = null; }
   if (rtCtx) { try { rtCtx.close(); } catch (e) { } rtCtx = null; }

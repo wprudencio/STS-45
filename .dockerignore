@@ -1,0 +1,10 @@
+.venv/
+bin/
+models/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+run.sh
+README.md
+.DS_Store

@@ -1,0 +1,44 @@
+services:
+  llama-server:
+    build: docker/llama
+    volumes:
+      - llama-models:/models
+    environment:
+      MODEL_FILE: "LFM2.5-230M-Q4_K_M.gguf"
+      HF_REPO: "LiquidAI/LFM2.5-230M-GGUF"
+    restart: unless-stopped
+
+  parakeet-stt:
+    build: docker/parakeet
+    volumes:
+      - stt-models:/models
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    volumes:
+      - piper-voices:/app/models/piper
+    environment:
+      LLM_API: "http://llama-server:8080/v1/chat/completions"
+      STT_API: "http://parakeet-stt:8081"
+      WS_CLIENT_PORT: "7777"
+    depends_on:
+      - llama-server
+      - parakeet-stt
+    restart: unless-stopped
+    stop_grace_period: 3s
+
+  nginx:
+    build: docker/nginx
+    ports:
+      - "7777:7777"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  llama-models:
+  stt-models:
+  piper-voices:
