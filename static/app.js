@@ -116,16 +116,24 @@ function setRTState(s) {
   const el = document.getElementById('rtState');
   el.textContent = s in labels ? labels[s] : s;
   el.className = 'rt-state ' + s;
-  const wrap = document.getElementById('rtVizWrap');
-  if (wrap) {
-    wrap.className = 'rt-viz-wrap'
-      + (s === 'listening' ? ' listening' : '')
-      + (s === 'thinking' ? ' thinking' : '')
-      + (s === 'speaking' ? ' speaking' : '')
-      + (rtRunning ? ' running' : '');
-  }
   if (s === 'speaking' || s === 'listening') rtAudioMuted = false;
   document.getElementById('rtEndBtn').classList.toggle('hidden', !rtRunning);
+  rtUpdateVizClasses();
+}
+
+function rtUpdateVizClasses() {
+  // The server sends state='speaking' while it generates/sends TTS chunks, but
+  // the client queues those chunks ahead via rtPlayTime. We want the orb to
+  // keep pulsing until playback actually finishes, so combine server state
+  // with whether any audio sources are still active/scheduled.
+  const wrap = document.getElementById('rtVizWrap');
+  if (!wrap) return;
+  const audioPlaying = rtPlaySources.length > 0;
+  wrap.className = 'rt-viz-wrap'
+    + (rtState === 'listening' && !audioPlaying ? ' listening' : '')
+    + (rtState === 'thinking' && !audioPlaying ? ' thinking' : '')
+    + (rtState === 'speaking' || audioPlaying ? ' speaking' : '')
+    + (rtRunning ? ' running' : '');
 }
 
 function rtSendStart() { if (rtWS && rtWS.readyState === 1) rtWS.send(JSON.stringify(Object.assign({ type: 'start' }, readSettings()))); }
@@ -178,6 +186,7 @@ function rtClearPlayback() {
   rtAudioMuted = true;
   rtPlaySources.forEach(s => { try { s.stop(); } catch (e) { } });
   rtPlaySources = []; if (rtPlayCtx) rtPlayTime = rtPlayCtx.currentTime;
+  rtUpdateVizClasses();
 }
 
 function onRTAudio(buf) {
@@ -194,7 +203,7 @@ function onRTAudio(buf) {
   const now = rtPlayCtx.currentTime;
   if (rtPlayTime < now) rtPlayTime = now + 0.02;
   src.start(rtPlayTime); rtPlayTime += ab.duration; rtPlaySources.push(src);
-  src.onended = () => { rtPlaySources = rtPlaySources.filter(s => s !== src); };
+  src.onended = () => { rtPlaySources = rtPlaySources.filter(s => s !== src); rtUpdateVizClasses(); };
 }
 
 function onRTMsg(m) {
