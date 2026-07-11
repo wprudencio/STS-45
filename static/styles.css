@@ -51,7 +51,7 @@ input, select, textarea { font-family: inherit; }
 .rt-overlay {
   position: relative; z-index: 2; width: 100%; height: 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 16px; padding: 28px; pointer-events: none;
+  gap: 30px; padding: 28px; pointer-events: none;
 }
 .rt-overlay > * { pointer-events: auto; }
 
@@ -123,7 +123,7 @@ input, select, textarea { font-family: inherit; }
   font-size: 43px; font-weight: 600;
   letter-spacing: .22em; text-transform: uppercase; color: var(--amber-dim);
   text-shadow: 0 0 10px rgba(255,170,0,.3); transition: color .25s, text-shadow .25s;
-  min-height: 1em; margin-top: 4px;
+  min-height: 1em; margin-top: 6px; margin-bottom: -8px;
 }
 .rt-state.listening { color: var(--amber); text-shadow: 0 0 10px rgba(255,170,0,.5); }
 .rt-state.thinking { color: var(--amber-soft); text-shadow: 0 0 10px rgba(255,204,68,.6); }
@@ -149,7 +149,7 @@ input, select, textarea { font-family: inherit; }
 .rt-line.live .rt-text::after { content: '▌'; color: var(--amber); text-shadow: 0 0 7px rgba(255,170,0,.6); animation: blink .6s steps(2) infinite; margin-left: 2px; }
 @keyframes blink { 0%,100%{ opacity:1 } 50%{ opacity:0 } }
 
-.rt-filler { height: 2px; }
+.rt-filler { height: 18px; }
 
 /* --- Settings drawer --- */
 .settings-panel {

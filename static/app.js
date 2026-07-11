@@ -295,9 +295,10 @@ window.toggleRealtime = function () { if (rtRunning) stopRealtime(); else startR
 // ============================================================
 // Pulse envelope viz — dual rings
 // ============================================================
-let rtPulseIn = null, rtPulseOut = null;
+let rtPulseIn = null, rtPulseOut = null, rtRing1 = null;
 let rtEnergyIn = 0, rtTargetIn = 0, rtEnergyOut = 0, rtTargetOut = 0;
 let rtPulseRaf = null;
+let rtRing1Driven = false;   // true while we're overriding ring1's CSS anim with audio energy
 const RT_ATTACK = 0.40;
 const RT_RELEASE = 0.07;
 
@@ -306,7 +307,27 @@ function rtPulseTick() {
   const a = RT_ATTACK, r = RT_RELEASE;
   rtEnergyIn  += (rtTargetIn  - rtEnergyIn)  * (rtTargetIn  > rtEnergyIn  ? a : r);
   rtEnergyOut += (rtTargetOut - rtEnergyOut) * (rtTargetOut > rtEnergyOut ? a : r);
-  if (rtPulseIn)  rtPulseIn.style.setProperty('--pin',  rtEnergyIn.toFixed(3));
+
+  // While the AI speaks, make the whole orb react to its own voice amplitude:
+  // the big ring scales/glows with speech, and the inner dot pulses too.
+  let pin = rtEnergyIn;
+  if (rtState === 'speaking' && rtRing1) {
+    pin = Math.max(rtEnergyIn, rtEnergyOut);
+    const e = rtEnergyOut;
+    if (!rtRing1Driven) { rtRing1Driven = true; rtRing1.style.animation = 'none'; }
+    rtRing1.style.transform = 'scale(' + (1 + e * 1.25).toFixed(3) + ')';
+    rtRing1.style.opacity = (0.2 + e * 0.5).toFixed(3);
+    rtRing1.style.boxShadow = ('0 0 ' + (10 + e * 26).toFixed(0) + 'px rgba(255,170,0,' + (0.3 + e * 0.5).toFixed(2) + ')');
+  } else if (rtRing1Driven && rtRing1) {
+    // hand control back to the CSS keyframe animations
+    rtRing1Driven = false;
+    rtRing1.style.animation = '';
+    rtRing1.style.transform = '';
+    rtRing1.style.opacity = '';
+    rtRing1.style.boxShadow = '';
+  }
+
+  if (rtPulseIn)  rtPulseIn.style.setProperty('--pin',  pin.toFixed(3));
   if (rtPulseOut) rtPulseOut.style.setProperty('--pout', rtEnergyOut.toFixed(3));
   if (rtEnergyIn < 0.002 && rtTargetIn < 0.002 && rtEnergyOut < 0.002 && rtTargetOut < 0.002) {
     cancelAnimationFrame(rtPulseRaf); rtPulseRaf = null;
@@ -315,13 +336,19 @@ function rtPulseTick() {
 function rtWaveStart() {
   rtPulseIn = document.getElementById('rtPulseIn');
   rtPulseOut = document.getElementById('rtPulseOut');
+  rtRing1 = document.getElementById('rtRing1');
   rtEnergyIn = 0; rtTargetIn = 0; rtEnergyOut = 0; rtTargetOut = 0;
   if (!rtPulseRaf) rtPulseRaf = requestAnimationFrame(rtPulseTick);
 }
 function rtWaveStop() {
   if (rtPulseRaf) { cancelAnimationFrame(rtPulseRaf); rtPulseRaf = null; }
   rtEnergyIn = 0; rtTargetIn = 0; rtEnergyOut = 0; rtTargetOut = 0;
-  rtPulseIn = null; rtPulseOut = null;
+  if (rtRing1 && rtRing1Driven) {
+    rtRing1Driven = false;
+    rtRing1.style.animation = ''; rtRing1.style.transform = '';
+    rtRing1.style.opacity = ''; rtRing1.style.boxShadow = '';
+  }
+  rtPulseIn = null; rtPulseOut = null; rtRing1 = null;
 }
 function rtPulsePushIn(v)  { rtTargetIn  = v; if (!rtPulseRaf) rtPulseRaf = requestAnimationFrame(rtPulseTick); }
 function rtPulsePushOut(v) { rtTargetOut = v; if (!rtPulseRaf) rtPulseRaf = requestAnimationFrame(rtPulseTick); }
