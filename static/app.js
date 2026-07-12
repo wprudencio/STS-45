@@ -232,10 +232,14 @@ async function startRealtime() {
   setRTState('connecting');
   // Same port? Use relative URL (Docker/nginx single-port). Otherwise explicit WS port (local dev).
   const pagePort = String(location.port || (location.protocol === 'https:' ? '443' : '80'));
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsHost = (!location.hostname || location.hostname === '0.0.0.0') ? '127.0.0.1' : location.hostname;
-  const url = (pagePort === String(RT_WS_PORT))
-    ? (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws'
-    : 'ws://' + wsHost + ':' + RT_WS_PORT + '/ws';
+  // same-port (Docker/nginx single-port) or HTTPS behind a proxy (e.g. Cloud Shell):
+  // the WS is reachable at the same host without an explicit secondary port.
+  const samePort = pagePort === String(RT_WS_PORT);
+  const url = (samePort || location.protocol === 'https:')
+    ? wsProto + '//' + location.host + '/ws'
+    : wsProto + '//' + wsHost + ':' + RT_WS_PORT + '/ws';
   try { rtWS = new WebSocket(url); }
   catch (e) { showToast('WS error: ' + e.message, 'error'); stopRealtimeUI(''); return; }
   rtWS.binaryType = 'arraybuffer';
