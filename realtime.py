@@ -250,43 +250,57 @@ class _Session:
         silence = (now - self.last_voice) * 1000
 
         # Periodic partial STT (only during normal listening, not barge).
-        # Bounded: at most PARTIAL_STT_TASKS in flight; we cancel the previous
-        # one before starting a new one so slow STT can't pile up tasks (and the
-        # utt_snap byte buffers they hold) in memory.
+        # Bounded: at most PARTIAL_STT_TASKS in flight, enforced by skip-if-busy
+        # below (don't start a new partial while one is still running). The
+        # earlier cancel-and-replace scheme didn't actually interrupt the
+        # blocking requests.post and let stale jobs pile up; see the note there.
         if not self.barging:
             partial_interval = 0.50  # seconds
             partial_min_samples = int(0.5 * SR_IN)
             if n >= partial_min_samples and (now - self.last_partial_time) >= partial_interval \
                     and (n - self.last_partial_samples) >= int(0.35 * SR_IN) \
                     and silence < SILENCE_MS:
-                self.last_partial_time = now
-                self.last_partial_samples = n
-                # cancel any still-running partial so we never have more than
-                # PARTIAL_STT_TASKS alive.
+                # skip-if-busy: never start a partial while one is still
+                # running. The previous code "cancelled" the old task and
+                # started a new one every 0.5s, but transcribe_wav is a
+                # blocking requests.post inside run_in_executor -- and
+                # task.cancel() CANNOT interrupt a call already executing in
+                # an executor thread. So the "cancelled" jobs kept running to
+                # completion (up to the 30s timeout), each holding a full copy
+                # of the ever-growing utterance bytes. On a long utterance each
+                # transcription takes longer than the 0.5s cadence, stale jobs
+                # piled up, saturated the shared default executor, and starved
+                # the final turn transcription -- the symptom where long audio
+                # "hangs" and only shows the whole text at the end. Skipping
+                # keeps at most one partial alive; the first frame after it
+                # returns picks up the latest buffer.
                 if self._partial_task is not None and not self._partial_task.done():
-                    self._partial_task.cancel()
-                utt_snap = bytes(self.utt)
-                seq = self._partial_seq + 1
-                self._partial_seq = seq
-                lang = self.cfg.get("lang", "en")
-                stt_api = self.cfg.get("stt_api_url", "")
-                async def _send_partial(my_seq=seq, snap=utt_snap):
-                    try:
-                        loop = asyncio.get_running_loop()
-                        text = await loop.run_in_executor(
-                            None, transcribe_wav,
-                            int16_to_wav_bytes(snap, SR_IN), "partial.wav", lang, stt_api
-                        )
-                        # discard stale results (a newer partial superseded us)
-                        if my_seq != self._partial_seq:
-                            return
-                        if text and not self.cancel and not self.turn_busy:
-                            self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception:
-                        pass
-                self._partial_task = asyncio.create_task(_send_partial())
+                    pass  # previous partial still transcribing; try next frame
+                else:
+                    self.last_partial_time = now
+                    self.last_partial_samples = n
+                    utt_snap = bytes(self.utt)
+                    seq = self._partial_seq + 1
+                    self._partial_seq = seq
+                    lang = self.cfg.get("lang", "en")
+                    stt_api = self.cfg.get("stt_api_url", "")
+                    async def _send_partial(my_seq=seq, snap=utt_snap):
+                        try:
+                            loop = asyncio.get_running_loop()
+                            text = await loop.run_in_executor(
+                                None, transcribe_wav,
+                                int16_to_wav_bytes(snap, SR_IN), "partial.wav", lang, stt_api
+                            )
+                            # discard stale results (a newer partial superseded us)
+                            if my_seq != self._partial_seq:
+                                return
+                            if text and not self.cancel and not self.turn_busy:
+                                self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            pass
+                    self._partial_task = asyncio.create_task(_send_partial())
 
         # --- utterance complete? submit to turn queue ---
         if n >= MIN_UTT and (silence >= SILENCE_MS or n >= MAX_UTT):
