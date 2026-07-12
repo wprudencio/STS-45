@@ -49,7 +49,7 @@ VAD_RMS = 0.022          # voice activity detection threshold (was 0.012)
 BARGE_RMS = 0.030         # barge-in threshold: lower = easier to interrupt (was 0.05)
 SILENCE_MS = 650
 MIN_UTT = int(0.30 * SR_IN)        # ~0.3s minimum utterance
-MAX_UTT = int(12 * SR_IN)          # force-split an over-long run
+MAX_UTT = int(18 * SR_IN)          # force-split an over-long run (was 12s)
 BARGE_CONFIRM = 2                  # consecutive voiced frames -> barge-in (~256ms, guards against clicks)
 
 # --- Memory safety: bounded history + queues ------------------------------
@@ -186,6 +186,39 @@ class _Session:
             self.state = s
             self.send_json({"type": "state", "state": s})
 
+    def _cancel_partial(self):
+        """Cancel any in-flight partial STT and bump the sequence so its
+        result is discarded. Prevents stale/racing partials from overwriting
+        the final transcript or keeping the STT server busy."""
+        if self._partial_task is not None and not self._partial_task.done():
+            self._partial_task.cancel()
+            self._partial_seq += 1
+        self._partial_task = None
+
+    def _try_submit_utterance(self, now=None):
+        """If the buffered utterance has reached an endpoint (silence or max
+        length), cancel any partial STT and hand the audio to the turn queue.
+        Safe to call repeatedly: it is a no-op when no endpoint is reached or
+        when a turn is already in flight."""
+        if self.turn_busy:
+            return
+        now = now or time.monotonic()
+        n = len(self.utt) // 2
+        if n < MIN_UTT:
+            return
+        silence = (now - self.last_voice) * 1000
+        if silence < SILENCE_MS and n < MAX_UTT:
+            return
+        self._cancel_partial()
+        utt = bytes(self.utt)
+        self.utt = bytearray()
+        self.last_partial_time = 0.0
+        self.last_partial_samples = 0
+        self.turn_busy = True
+        self.barging = False
+        self.set_state("thinking")
+        self.turn_q.put_nowait(utt)
+
     # --- loops --------------------------------------------------------------
     async def sender(self):
         try:
@@ -212,7 +245,11 @@ class _Session:
                 self.barging = False
                 self.cancel = False
                 self._tts_warned = False
-                if not self.closed:
+                # The user may have kept talking while we were busy (STT/LLM/TTS).
+                # Drain any completed utterance immediately; if they are still
+                # talking, the next audio frame will trigger the boundary check.
+                self._try_submit_utterance()
+                if not self.closed and not self.turn_busy:
                     self.set_state("listening")
 
     # --- mic audio (called on the loop thread) ------------------------------
@@ -222,96 +259,77 @@ class _Session:
         rms, _ = _rms(pcm16_bytes)
         now = time.monotonic()
 
-        # --- barge-in detection: only watch for triggers while assistant speaks
+        # Buffer every single frame. Previously frames received while a turn was
+        # in flight were dropped, so users who kept talking lost everything
+        # said during STT/LLM/TTS. The VAD boundary is only evaluated when no
+        # turn is running.
+        if rms >= VAD_RMS:
+            self.last_voice = now
+        self.utt.extend(pcm16_bytes)
+
+        # --- barge-in detection while assistant is busy ---
         if self.turn_busy and not self.barging:
             if rms >= BARGE_RMS:
                 self.barge_count += 1
                 if self.barge_count >= BARGE_CONFIRM and not self.cancel:
                     self.cancel = True
                     self.barging = True
+                    self.barge_count = 0
                     self.send_json({"type": "clear"})
-                    self.utt = bytearray()
                     self.last_voice = now
-                    # fall through — accumulate this frame (don't lose the
-                    # 128 ms that triggered the barge; short utterances depend on it)
             else:
                 self.barge_count = 0
-            if not self.barging:
-                return  # still just watching; skip utterance logic below
-            # barge just triggered → continue to accumulate below
+            # While the current turn is alive we only buffer; the drain after
+            # run_turn finishes will submit any completed utterance.
+            return
 
-        # --- accumulate audio (normal listening or post-barge capture) ---
-        if not self.turn_busy or self.barging:
-            if rms >= VAD_RMS:
-                self.last_voice = now
-            self.utt.extend(pcm16_bytes)
+        if self.turn_busy and self.barging:
+            # Capturing the interrupting utterance while the old turn winds down.
+            # Keep buffering; _try_submit_utterance runs once turn_busy drops.
+            return
 
         n = len(self.utt) // 2
         silence = (now - self.last_voice) * 1000
 
-        # Periodic partial STT (only during normal listening, not barge).
-        # Bounded: at most PARTIAL_STT_TASKS in flight, enforced by skip-if-busy
-        # below (don't start a new partial while one is still running). The
-        # earlier cancel-and-replace scheme didn't actually interrupt the
-        # blocking requests.post and let stale jobs pile up; see the note there.
+        # Periodic partial STT (only while freely listening, not during barge).
+        # We cap the buffer length: re-transcribing a 15+ second monologue every
+        # half second wastes STT time and the result is discarded anyway.
         if not self.barging:
-            partial_interval = 0.50  # seconds
+            partial_interval = 0.75  # seconds
             partial_min_samples = int(0.5 * SR_IN)
-            if n >= partial_min_samples and (now - self.last_partial_time) >= partial_interval \
+            partial_max_samples = int(8 * SR_IN)
+            if n <= partial_max_samples and n >= partial_min_samples \
+                    and (now - self.last_partial_time) >= partial_interval \
                     and (n - self.last_partial_samples) >= int(0.35 * SR_IN) \
                     and silence < SILENCE_MS:
-                # skip-if-busy: never start a partial while one is still
-                # running. The previous code "cancelled" the old task and
-                # started a new one every 0.5s, but transcribe_wav is a
-                # blocking requests.post inside run_in_executor -- and
-                # task.cancel() CANNOT interrupt a call already executing in
-                # an executor thread. So the "cancelled" jobs kept running to
-                # completion (up to the 30s timeout), each holding a full copy
-                # of the ever-growing utterance bytes. On a long utterance each
-                # transcription takes longer than the 0.5s cadence, stale jobs
-                # piled up, saturated the shared default executor, and starved
-                # the final turn transcription -- the symptom where long audio
-                # "hangs" and only shows the whole text at the end. Skipping
-                # keeps at most one partial alive; the first frame after it
-                # returns picks up the latest buffer.
-                if self._partial_task is not None and not self._partial_task.done():
-                    pass  # previous partial still transcribing; try next frame
-                else:
-                    self.last_partial_time = now
-                    self.last_partial_samples = n
-                    utt_snap = bytes(self.utt)
-                    seq = self._partial_seq + 1
-                    self._partial_seq = seq
-                    lang = self.cfg.get("lang", "en")
-                    stt_api = self.cfg.get("stt_api_url", "")
-                    async def _send_partial(my_seq=seq, snap=utt_snap):
-                        try:
-                            loop = asyncio.get_running_loop()
-                            text = await loop.run_in_executor(
-                                None, transcribe_wav,
-                                int16_to_wav_bytes(snap, SR_IN), "partial.wav", lang, stt_api
-                            )
-                            # discard stale results (a newer partial superseded us)
-                            if my_seq != self._partial_seq:
-                                return
-                            if text and not self.cancel and not self.turn_busy:
-                                self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
-                        except asyncio.CancelledError:
-                            pass
-                        except Exception:
-                            pass
-                    self._partial_task = asyncio.create_task(_send_partial())
+                self.last_partial_time = now
+                self.last_partial_samples = n
+                self._cancel_partial()
+                utt_snap = bytes(self.utt)
+                seq = self._partial_seq + 1
+                self._partial_seq = seq
+                lang = self.cfg.get("lang", "en")
+                stt_api = self.cfg.get("stt_api_url", "")
+                async def _send_partial(my_seq=seq, snap=utt_snap):
+                    try:
+                        loop = asyncio.get_running_loop()
+                        text = await loop.run_in_executor(
+                            None, transcribe_wav,
+                            int16_to_wav_bytes(snap, SR_IN), "partial.wav", lang, stt_api
+                        )
+                        # discard stale results (a newer partial superseded us)
+                        if my_seq != self._partial_seq:
+                            return
+                        if text and not self.cancel and not self.turn_busy:
+                            self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+                self._partial_task = asyncio.create_task(_send_partial())
 
         # --- utterance complete? submit to turn queue ---
-        if n >= MIN_UTT and (silence >= SILENCE_MS or n >= MAX_UTT):
-            utt = bytes(self.utt)
-            self.utt = bytearray()
-            self.last_partial_time = 0.0
-            self.last_partial_samples = 0
-            self.turn_busy = True
-            self.barging = False
-            self.set_state("thinking")
-            self.turn_q.put_nowait(utt)
+        self._try_submit_utterance(now)
 
     # --- one conversation turn (runs in a worker thread) --------------------
     def run_turn(self, utt_bytes):
@@ -469,16 +487,21 @@ def transcribe_wav(wav_bytes, filename, lang, stt_api_url):
     }
     parakeet_lang = lang_map.get(lang, "en")
     url = (stt_api_url or "").rstrip("/") + "/v1/audio/transcriptions"
+    # Scale the HTTP timeout with audio length so long utterances (and any
+    # queueing behind a partial STT request) don't get killed mid-transcription.
+    audio_seconds = max(1.0, len(wav_bytes) / (2 * SR_IN))
+    timeout = max(30, int(audio_seconds * 4) + 5)
     try:
         resp = requests.post(
             url,
             files={"file": (filename, wav_bytes, "audio/wav")},
             data={"language": parakeet_lang, "response_format": "json"},
-            timeout=30,
+            timeout=timeout,
         )
         resp.raise_for_status()
         return (resp.json().get("text", "") or "").strip()
-    except Exception:
+    except Exception as e:
+        print(f"[realtime] STT failed ({filename}, {audio_seconds:.1f}s, timeout={timeout}s): {e}", flush=True)
         return ""
 
 
@@ -623,7 +646,8 @@ async def _handler(ws):
                     sess.barging = True
                     sess.cancel = True
                     sess.barge_count = 0
-                    sess.utt = bytearray()
+                    # Do NOT clear sess.utt: the server has been buffering every
+                    # frame, so the audio that triggered the barge is already here.
                     sess.last_voice = time.monotonic()
                     sess.send_json({"type": "clear"})
                     sess.set_state("listening")
