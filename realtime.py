@@ -10,22 +10,19 @@ but fully local:
 The browser streams 16 kHz PCM16 mono over the socket; the server runs an
 energy VAD to find utterance boundaries, transcribes each utterance, streams
 the LLM reply, and speaks it back sentence-by-sentence as PCM16 frames so audio
-starts before the full reply is generated. Barge-in (interrupting the assistant
-mid-speech) is supported both server- and client-side.
+starts before the full reply is generated.
 
 Protocol (text frames are JSON; binary frames are raw PCM16 little-endian):
 
   client -> server
     {type:"start", lang,voice,steps,speed,api_url,api_key,sys_prompt,max_tokens}
     {type:"stop"}              clean teardown
-    {type:"barge"}             request cancellation of the current turn
     <bytes>                    16 kHz PCM16 mono mic audio
 
   server -> client
     {type:"ready", sampleRate}               session accepted; tts.sample_rate
     {type:"state", state}                    listening | thinking | speaking
     {type:"transcript", role, text, final}   user (final) / assistant (delta)
-    {type:"clear"}                           drop the TTS playback queue (barge)
     {type:"error", text}
     <bytes>                                  TTS PCM16 mono at sampleRate
 """
@@ -43,14 +40,21 @@ import requests
 import websockets
 from websockets.asyncio.server import serve
 
+# --- logging (stdout → Docker console) ---
+_SESS_CTR = [0]  # mutable counter shared across sessions
+
+def _now_ts():
+    return time.strftime("%H:%M:%S", time.localtime()) + f".{int(time.time() * 1000) % 1000:03d}"
+
+def _log(sid, msg):
+    print(f"[{_now_ts()}] [sess:{sid}] {msg}", flush=True)
+
 # --- Voice activity detection (mirrors the browser PTT thresholds) ----------
 SR_IN = 16000
 VAD_RMS = 0.022          # voice activity detection threshold (was 0.012)
-BARGE_RMS = 0.030         # barge-in threshold: lower = easier to interrupt (was 0.05)
 SILENCE_MS = 650
 MIN_UTT = int(0.30 * SR_IN)        # ~0.3s minimum utterance
 MAX_UTT = int(18 * SR_IN)          # force-split an over-long run (was 12s)
-BARGE_CONFIRM = 2                  # consecutive voiced frames -> barge-in (~256ms, guards against clicks)
 
 # --- Memory safety: bounded history + queues ------------------------------
 # The conversation history is sent to the LLM every turn, so unbounded growth
@@ -62,7 +66,7 @@ OUT_Q_MAX = 64                     # backpressure: don't queue infinite audio
 PARTIAL_STT_TASKS = 1               # at most one in-flight partial transcription
 
 # --- Streaming TTS chunking -------------------------------------------------
-# We synthesize per clause so the first audio appears early and barge-in stays
+# We synthesize per clause so the first audio appears early.
 # responsive (cancel is checked between chunks, not once per paragraph).
 _CHUNK_MAX = 140                    # chars; split longer sentences further
 _CLAUSE_RE = re.compile(
@@ -134,6 +138,10 @@ class _Session:
         self.app = app
         self.loop = loop
 
+        _SESS_CTR[0] += 1
+        self.sid = _SESS_CTR[0]  # stable integer session id for logs
+        _log(self.sid, "session created")
+
         self.cfg = {}
         self.history = []
         self.tts_sr = 24000
@@ -142,8 +150,6 @@ class _Session:
         self.last_voice = 0.0
         self.last_partial_time = 0.0  # timestamp of last partial STT send
         self.last_partial_samples = 0  # sample count at last partial
-        self.barge_count = 0
-        self.barging = False         # capturing the post-barge utterance
 
         self.state = "idle"          # idle | listening | thinking | speaking
         self.turn_busy = False
@@ -154,26 +160,37 @@ class _Session:
         self.turn_q = asyncio.Queue()  # utterance bytes; drained by turn_loop
         self._partial_task = None      # in-flight partial STT task (cancellable)
         self._partial_seq = 0          # monotonically increasing partial id
+        self._last_rms_log = 0.0       # throttle periodic RMS logs
+        self._loop_tid = threading.get_ident()  # event-loop thread id for emit
 
     # --- output (thread-safe enqueue onto the loop) -------------------------
+    # run_turn() executes in a ThreadPoolExecutor thread and calls
+    # send_json / send_audio / set_state. asyncio.Queue.put_nowait is NOT
+    # thread-safe, so we route through call_soon_threadsafe when called from
+    # a non-event-loop thread. When already on the loop thread (on_audio,
+    # handler), call_soon_threadsafe adds unnecessary delay.
     def emit(self, item):
         if self.closed:
             return
+        if threading.get_ident() == self._loop_tid:
+            # Already on event-loop thread — call directly, no scheduling overhead
+            self._emit_on_loop(item)
+        else:
+            # Executor thread (run_turn) — must go through the event loop
+            self.loop.call_soon_threadsafe(self._emit_on_loop, item)
+
+    def _emit_on_loop(self, item):
+        """Called on the event-loop thread — direct queue put."""
+        if self.closed:
+            return
         try:
-            # put_nowait on a bounded queue; if the client fell behind we drop
-            # audio (keeps latency bounded) rather than grow memory forever.
             self.out_q.put_nowait(item)
         except asyncio.QueueFull:
-            # Drop oldest to make room for newest state messages; audio frames
-            # are dropped outright (a stuck client misses a little audio, not a
-            # whole turn).
             try:
                 self.out_q.get_nowait()
                 self.out_q.put_nowait(item)
             except Exception:
                 pass
-        except RuntimeError:
-            pass
 
     def send_json(self, obj):
         self.emit(json.dumps(obj))
@@ -183,6 +200,7 @@ class _Session:
 
     def set_state(self, s):
         if self.state != s:
+            _log(self.sid, f"state {self.state} -> {s}")
             self.state = s
             self.send_json({"type": "state", "state": s})
 
@@ -191,6 +209,7 @@ class _Session:
         result is discarded. Prevents stale/racing partials from overwriting
         the final transcript or keeping the STT server busy."""
         if self._partial_task is not None and not self._partial_task.done():
+            _log(self.sid, "cancel in-flight partial STT")
             self._partial_task.cancel()
             self._partial_seq += 1
         self._partial_task = None
@@ -209,15 +228,17 @@ class _Session:
         silence = (now - self.last_voice) * 1000
         if silence < SILENCE_MS and n < MAX_UTT:
             return
+        _log(self.sid, f"submit utterance: {n} samples ({n/SR_IN:.1f}s), silence={silence:.0f}ms, rms={_rms(bytes(self.utt))[0]:.4f}")
         self._cancel_partial()
         utt = bytes(self.utt)
         self.utt = bytearray()
         self.last_partial_time = 0.0
         self.last_partial_samples = 0
         self.turn_busy = True
-        self.barging = False
         self.set_state("thinking")
+        _log(self.sid, f"DEBUG: before put_nowait, turn_q empty={self.turn_q.empty()}, loop running={self.loop.is_running()}")
         self.turn_q.put_nowait(utt)
+        _log(self.sid, f"DEBUG: put_nowait OK, turn_q size={self.turn_q.qsize()}")
 
     # --- loops --------------------------------------------------------------
     async def sender(self):
@@ -232,17 +253,21 @@ class _Session:
 
     async def turn_loop(self):
         while True:
+            _log(self.sid, f"DEBUG: turn_loop waiting, qempty={self.turn_q.empty()}, alive={asyncio.current_task().done()}")
             utt = await self.turn_q.get()
             if utt is None:
+                _log(self.sid, "turn_loop stopping")
                 break
             self.turn_busy = True   # guard: old turn finally may have cleared it
+            _log(self.sid, f"turn start — utt={len(utt)//2}spl pcm")
             try:
                 await self.loop.run_in_executor(None, self.run_turn, utt)
             except Exception as e:
+                _log(self.sid, f"turn exception: {e}")
                 self.send_json({"type": "error", "text": str(e)})
             finally:
+                _log(self.sid, f"turn end — busy={self.turn_busy} cancel={self.cancel}")
                 self.turn_busy = False
-                self.barging = False
                 self.cancel = False
                 self._tts_warned = False
                 # The user may have kept talking while we were busy (STT/LLM/TTS).
@@ -267,98 +292,97 @@ class _Session:
             self.last_voice = now
         self.utt.extend(pcm16_bytes)
 
-        # --- barge-in detection while assistant is busy ---
-        if self.turn_busy and not self.barging:
-            if rms >= BARGE_RMS:
-                self.barge_count += 1
-                if self.barge_count >= BARGE_CONFIRM and not self.cancel:
-                    self.cancel = True
-                    self.barging = True
-                    self.barge_count = 0
-                    self.send_json({"type": "clear"})
-                    self.last_voice = now
-            else:
-                self.barge_count = 0
-            # While the current turn is alive we only buffer; the drain after
-            # run_turn finishes will submit any completed utterance.
-            return
+        # throttle: log RMS + buffer size roughly every 1s
+        if now - self._last_rms_log >= 1.0:
+            self._last_rms_log = now
+            _log(self.sid, f"audio rms={rms:.4f} buf={len(self.utt)//2}spl turn_busy={self.turn_busy}")
 
-        if self.turn_busy and self.barging:
-            # Capturing the interrupting utterance while the old turn winds down.
-            # Keep buffering; _try_submit_utterance runs once turn_busy drops.
+        # While a turn is in progress, just buffer audio. The drain after
+        # run_turn finishes will submit any completed utterance.
+        if self.turn_busy:
             return
 
         n = len(self.utt) // 2
         silence = (now - self.last_voice) * 1000
 
-        # Periodic partial STT (only while freely listening, not during barge).
+        # Periodic partial STT (only while freely listening).
         # We cap the buffer length: re-transcribing a 15+ second monologue every
         # half second wastes STT time and the result is discarded anyway.
-        if not self.barging:
-            partial_interval = 0.75  # seconds
-            partial_min_samples = int(0.5 * SR_IN)
-            partial_max_samples = int(8 * SR_IN)
-            if n <= partial_max_samples and n >= partial_min_samples \
-                    and (now - self.last_partial_time) >= partial_interval \
-                    and (n - self.last_partial_samples) >= int(0.35 * SR_IN) \
-                    and silence < SILENCE_MS:
-                self.last_partial_time = now
-                self.last_partial_samples = n
-                self._cancel_partial()
-                utt_snap = bytes(self.utt)
-                seq = self._partial_seq + 1
-                self._partial_seq = seq
-                lang = self.cfg.get("lang", "en")
-                stt_api = self.cfg.get("stt_api_url", "")
-                async def _send_partial(my_seq=seq, snap=utt_snap):
-                    try:
-                        loop = asyncio.get_running_loop()
-                        text = await loop.run_in_executor(
-                            None, transcribe_wav,
-                            int16_to_wav_bytes(snap, SR_IN), "partial.wav", lang, stt_api
-                        )
-                        # discard stale results (a newer partial superseded us)
-                        if my_seq != self._partial_seq:
-                            return
-                        if text and not self.cancel and not self.turn_busy:
-                            self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception:
-                        pass
-                self._partial_task = asyncio.create_task(_send_partial())
+        partial_interval = 0.75  # seconds
+        partial_min_samples = int(0.5 * SR_IN)
+        partial_max_samples = int(8 * SR_IN)
+        if n <= partial_max_samples and n >= partial_min_samples \
+                and (now - self.last_partial_time) >= partial_interval \
+                and (n - self.last_partial_samples) >= int(0.35 * SR_IN) \
+                and silence < SILENCE_MS:
+            self.last_partial_time = now
+            self.last_partial_samples = n
+            self._cancel_partial()
+            utt_snap = bytes(self.utt)
+            seq = self._partial_seq + 1
+            self._partial_seq = seq
+            lang = self.cfg.get("lang", "en")
+            stt_api = self.cfg.get("stt_api_url", "")
+            async def _send_partial(my_seq=seq, snap=utt_snap):
+                try:
+                    loop = asyncio.get_running_loop()
+                    text = await loop.run_in_executor(
+                        None, transcribe_wav,
+                        int16_to_wav_bytes(snap, SR_IN), "partial.wav", lang, stt_api
+                    )
+                    # discard stale results (a newer partial superseded us)
+                    if my_seq != self._partial_seq:
+                        return
+                    if text and not self.cancel and not self.turn_busy:
+                        self.send_json({"type": "transcript", "role": "user", "text": text, "final": False})
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+            self._partial_task = asyncio.create_task(_send_partial())
 
         # --- utterance complete? submit to turn queue ---
         self._try_submit_utterance(now)
+        _log(self.sid, f"DEBUG: on_audio done turn_busy={self.turn_busy} utt={len(self.utt)//2}spl")
 
     # --- one conversation turn (runs in a worker thread) --------------------
     def run_turn(self, utt_bytes):
         rms, _ = _rms(utt_bytes)
         n = len(utt_bytes) // 2
         if rms < VAD_RMS * 0.5 or n < MIN_UTT:
+            _log(self.sid, f"turn skipped: rms={rms:.4f} n={n} (too quiet/short)")
             return  # too quiet / too short; silently resume listening
 
+        _log(self.sid, f"STT start — {n} samples ({n/SR_IN:.1f}s) rms={rms:.4f}")
         self.set_state("thinking")
+        t0 = time.monotonic()
         text = transcribe_wav(
             int16_to_wav_bytes(utt_bytes, SR_IN),
             "utt.wav",
             self.cfg.get("lang", "en"),
             self.cfg.get("stt_api_url", ""),
         )
+        _log(self.sid, f"STT done in {time.monotonic()-t0:.1f}s → {repr(text)}")
         if self.cancel:
+            _log(self.sid, "turn cancelled after STT")
             return
         if not text:
+            _log(self.sid, "STT returned empty — aborting turn (no response)")
             return
         self.send_json({"type": "transcript", "role": "user", "text": text, "final": True})
         self.history.append({"role": "user", "content": text})
 
+        _log(self.sid, f"LLM stream start — history={len(self.history)} msgs")
         acc = ""
         buf = ""
         first_spoken = False
+        chunk_count = 0
         for kind, tok in stream_llm(self.history, self.cfg):
             if self.cancel:
+                _log(self.sid, "turn cancelled during LLM stream")
                 break
             if kind == "error":
+                _log(self.sid, f"LLM error: {tok}")
                 self.send_json({"type": "error", "text": tok})
                 continue
             if kind != "text":
@@ -373,8 +397,10 @@ class _Session:
                 piece, buf = _take_first_phrase(buf)
                 if piece is None:
                     continue
+                _log(self.sid, f"TTS first phrase ({len(piece)} chars): {repr(piece[:80])}")
                 self._speak(piece)
                 first_spoken = True
+                chunk_count += 1
                 if self.cancel:
                     break
                 continue
@@ -384,15 +410,20 @@ class _Session:
                 if piece is None:
                     break
                 self._speak(piece)
+                chunk_count += 1
                 if self.cancel:
                     break
         if not self.cancel and buf.strip():
             self._speak(buf)
+            chunk_count += 1
+        _log(self.sid, f"LLM stream done — acc={len(acc)} chars, {chunk_count} TTS chunks")
         if not self.cancel:
             self.send_json({"type": "transcript", "role": "assistant", "text": "", "final": True})
             if acc.strip():
                 self.history.append({"role": "assistant", "content": acc})
                 self._prune_history()
+            else:
+                _log(self.sid, "WARNING: LLM returned zero text content — no response spoken")
 
     def _prune_history(self):
         """Keep the system prompt + the most recent HISTORY_MAX_TURNS pairs.
@@ -465,7 +496,7 @@ def _take_one_clause(buf):
     Returns (piece|None, rest). We only flush once a sentence terminator (.!?)
     has arrived, so the first TTS call happens on a full clause, not a fragment.
     A very long buffer with no terminator (a rambling model) is force-flushed so
-    synthesis can start and barge-in stays responsive."""
+    synthesis can start and stay responsive."""
     m = _SENT_END.search(buf)
     if m:
         end = m.end()
@@ -491,6 +522,7 @@ def transcribe_wav(wav_bytes, filename, lang, stt_api_url):
     # queueing behind a partial STT request) don't get killed mid-transcription.
     audio_seconds = max(1.0, len(wav_bytes) / (2 * SR_IN))
     timeout = max(30, int(audio_seconds * 4) + 5)
+    t0 = time.monotonic()
     try:
         resp = requests.post(
             url,
@@ -498,10 +530,14 @@ def transcribe_wav(wav_bytes, filename, lang, stt_api_url):
             data={"language": parakeet_lang, "response_format": "json"},
             timeout=timeout,
         )
+        elapsed = time.monotonic() - t0
         resp.raise_for_status()
-        return (resp.json().get("text", "") or "").strip()
+        text = (resp.json().get("text", "") or "").strip()
+        print(f"[{_now_ts()}] STT {filename} → {elapsed:.1f}s lang={parakeet_lang} text={repr(text)}", flush=True)
+        return text
     except Exception as e:
-        print(f"[realtime] STT failed ({filename}, {audio_seconds:.1f}s, timeout={timeout}s): {e}", flush=True)
+        elapsed = time.monotonic() - t0
+        print(f"[{_now_ts()}] STT FAIL ({filename}, {audio_seconds:.1f}s, timeout={timeout}s, elapsed={elapsed:.1f}s): {e}", flush=True)
         return ""
 
 
@@ -512,6 +548,7 @@ def stream_llm(history, cfg):
     """
     api_url = (cfg.get("api_url") or "").strip()
     if not api_url:
+        print(f"[{_now_ts()}] LLM SKIP: no api_url configured", flush=True)
         return
     payload = {
         "model": cfg.get("model", "default"),
@@ -524,21 +561,25 @@ def stream_llm(history, cfg):
     api_key = (cfg.get("api_key") or "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    t0 = time.monotonic()
+    print(f"[{_now_ts()}] LLM POST → {api_url} model={payload['model']} history={len(history)}", flush=True)
     try:
         r = requests.post(api_url, json=payload, headers=headers, stream=True, timeout=120)
         r.raise_for_status()
         r.encoding = "utf-8"
+        print(f"[{_now_ts()}] LLM connected in {time.monotonic()-t0:.2f}s", flush=True)
     except Exception as e:
-        print(f"[realtime] LLM request failed: {e}", flush=True)
+        print(f"[{_now_ts()}] LLM FAIL ({time.monotonic()-t0:.2f}s): {e}", flush=True)
         yield ("error", f"LLM request failed: {e}")
         return
     # Important: must close the streaming response even when the consumer
-    # breaks early (barge-in). Without this the underlying socket stays open
+    # breaks early (e.g. teardown). Without this the underlying
     # and urllib3 connections leak, eventually exhausting the pool and making
     # every request slower/hang — the "gets slow over time" symptom.
     try:
         has_content = False
         has_reasoning = False
+        char_count = 0
         for line in r.iter_lines(decode_unicode=True):
             if not line or not line.startswith("data: "):
                 continue
@@ -552,6 +593,7 @@ def stream_llm(history, cfg):
             choices = chunk.get("choices", [])
             if not choices:
                 continue
+            finish = choices[0].get("finish_reason")
             delta = choices[0].get("delta", {})
             reasoning = delta.get("reasoning_content")
             content = delta.get("content")
@@ -560,11 +602,18 @@ def stream_llm(history, cfg):
                 yield ("reasoning", reasoning)
             elif content:
                 has_content = True
+                char_count += len(content)
                 yield ("text", content)
+            if finish:
+                print(f"[{_now_ts()}] LLM finish_reason={finish} chars={char_count}", flush=True)
+        elapsed = time.monotonic() - t0
         if not has_content and not has_reasoning:
+            print(f"[{_now_ts()}] LLM WARN: zero content after {elapsed:.1f}s", flush=True)
             yield ("error", "LLM returned no content (check that llama-server is running and the API URL is correct).")
+        else:
+            print(f"[{_now_ts()}] LLM DONE: {char_count} chars in {elapsed:.1f}s", flush=True)
     finally:
-        # runs on normal exit, break, or generator close (barge-in/teardown)
+        # runs on normal exit, break, or generator close (teardown)
         try:
             r.close()
         except Exception:
@@ -575,6 +624,7 @@ def synth_to_pcm16(app, cfg, text):
     """Synthesize `text` with Piper TTS; return int16 PCM numpy array."""
     voice_map = getattr(app, "tts", None)
     if not voice_map:
+        print(f"[{_now_ts()}] TTS SKIP: no voice map loaded yet", flush=True)
         return None
     try:
         from pathlib import Path
@@ -594,9 +644,11 @@ def synth_to_pcm16(app, cfg, text):
             voice, sr = voice_map[voice_name]
         gen = voice.synthesize(text)
         pcm = b"".join(chunk.audio_int16_bytes for chunk in gen)
-        return np.frombuffer(pcm, dtype=np.int16)
+        arr = np.frombuffer(pcm, dtype=np.int16)
+        print(f"[{_now_ts()}] TTS synth OK: {len(text)} chars → {len(arr)} samples ({len(arr)/sr:.2f}s @ {sr}Hz)", flush=True)
+        return arr
     except Exception as e:
-        print(f"[realtime] TTS synth failed: {e}", flush=True)
+        print(f"[{_now_ts()}] TTS FAIL: {e} (text={repr(text[:60])})", flush=True)
         return None
 
 
@@ -631,31 +683,23 @@ async def _handler(ws):
                 }
                 sp = (data.get("sys_prompt") or "").strip()
                 sess.history = [{"role": "system", "content": sp or _app.SYS_PROMPT}]
+                _log(sess.sid, f"start cfg: voice={sess.cfg['voice']} lang={sess.cfg['lang']} model={sess.cfg['model']}")
                 tts_dict = getattr(_app, "tts", None)
                 if not tts_dict:
+                    _log(sess.sid, "start rejected: TTS model not loaded")
                     sess.send_json({"type": "error", "text": "TTS model still loading — retrying…"})
                     continue
                 sess.tts_sr = 22050  # Piper sample rate
                 sess.cancel = False
                 sess.set_state("listening")
                 await ws.send(json.dumps({"type": "ready", "sampleRate": sess.tts_sr}))
-            elif t == "barge":
-                # Client-side instant barge: stop playback locally + tell server
-                # to abandon the current turn AND capture the interrupting speech.
-                if sess.turn_busy and not sess.barging:
-                    sess.barging = True
-                    sess.cancel = True
-                    sess.barge_count = 0
-                    # Do NOT clear sess.utt: the server has been buffering every
-                    # frame, so the audio that triggered the barge is already here.
-                    sess.last_voice = time.monotonic()
-                    sess.send_json({"type": "clear"})
-                    sess.set_state("listening")
             elif t == "stop":
+                _log(sess.sid, "stop requested")
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        _log(sess.sid, f"handler exception: {e}")
     finally:
+        _log(sess.sid, "session closing")
         sess.closed = True
         sess.cancel = True
         sess.out_q.put_nowait(None)
