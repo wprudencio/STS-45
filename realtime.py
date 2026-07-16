@@ -61,7 +61,7 @@ MAX_UTT = int(18 * SR_IN)          # force-split an over-long run (was 12s)
 # makes each response slower and eats memory. We keep the system prompt plus a
 # sliding window of recent turns; old turns are dropped. Tune HISTORY_MAX_TURNS
 # (= number of user+assistant pairs retained) to taste.
-HISTORY_MAX_TURNS = 12              # pairs of (user, assistant) kept
+HISTORY_MAX_TURNS = 4               # pairs of (user, assistant) kept
 OUT_Q_MAX = 64                     # backpressure: don't queue infinite audio
 PARTIAL_STT_TASKS = 1               # at most one in-flight partial transcription
 
@@ -426,17 +426,24 @@ class _Session:
                 _log(self.sid, "WARNING: LLM returned zero text content — no response spoken")
 
     def _prune_history(self):
-        """Keep the system prompt + the most recent HISTORY_MAX_TURNS pairs.
-        Prevents the LLM context (and memory) from growing every turn, which is
-        the main cause of the slowdown that builds over a long session."""
+        """Keep system prompt + recent turns. Caps message count AND total
+        character count to prevent prompt eval from ballooning on CPU-only
+        inference (e.g. Docker with llama-server)."""
         if not self.history:
             return
-        # find the system prompt (always index 0 on start) and keep it; cap the
-        # rest to 2 * HISTORY_MAX_TURNS messages (user+assistant pairs).
         sys_prefix = 1 if self.history[0].get("role") == "system" else 0
         max_msgs = sys_prefix + 2 * HISTORY_MAX_TURNS
         if len(self.history) > max_msgs:
             self.history = self.history[:sys_prefix] + self.history[-(max_msgs - sys_prefix):]
+        # Hard-cap total content length. On CPU, a 4K+ token prompt easily
+        # takes 5+ seconds to evaluate before the first token is generated.
+        MAX_HIST_CHARS = 1500
+        total = sum(len(m.get("content", "")) for m in self.history)
+        while total > MAX_HIST_CHARS and len(self.history) > sys_prefix + 2:
+            self.history.pop(sys_prefix)        # oldest user
+            if sys_prefix < len(self.history):
+                self.history.pop(sys_prefix)    # matching assistant
+            total = sum(len(m.get("content", "")) for m in self.history)
 
     def _speak(self, text):
         for chunk in _chunk_text(text):
@@ -554,7 +561,7 @@ def stream_llm(history, cfg):
         "model": cfg.get("model", "default"),
         "messages": history,
         "stream": True,
-        "max_tokens": int(cfg.get("max_tokens", 512)),
+        "max_tokens": int(cfg.get("max_tokens", 256)),
         "temperature": 0.7,
     }
     headers = {"Content-Type": "application/json"}
