@@ -18,7 +18,7 @@ One script sets up everything: installs nginx, downloads models, creates the Pyt
 
 - **Ubuntu 24.04** (or Debian-based Linux). Other distros work but may need adapted package names.
 - **Python 3.12+** (`python3 --version` to check). Piper TTS works on Python ≥ 3.9.
-- **~1 GB free disk space** for models (~150 MB LLM, ~260 MB STT, ~150 MB parakeet binary).
+- **~1 GB free disk space** for models (~2.1 GB LLM, ~260 MB STT, ~2.1 GB parakeet binary).
 - **sudo access** (for installing nginx).
 - **Headphones recommended** to avoid speaker → mic echo.
 
@@ -42,7 +42,7 @@ The script will:
 1. Install system packages: `nginx`, `curl`, `wget`, `libgomp1`, `python3-pip`, `python3-venv`
 2. Create a Python virtual environment (`.venv/`) and install `piper-tts`, `flask`, `websockets`, etc.
 3. Download **llama.cpp** via the official [llama.app](https://llama.app) installer
-4. Download the **LLM model** (`LiquidAI/LFM2.5-230M-Q4_K_M.gguf`, ~150 MB)
+4. Download the **LLM model** (`unsloth/gemma-4-E2B-it-qat-GGUF`, ~2.1 GB)
 5. Download the **parakeet-server** binary (v0.4.0, ~2.7 MB) into `bin/`
 6. Download the **STT model** (`tdt_ctc-110m-f16.gguf`, ~260 MB)
 7. Configure **nginx** as a reverse proxy (port `7777` → Flask `7778` + WS `7779`)
@@ -56,10 +56,10 @@ In a **separate terminal** (or tmux pane), run:
 ```bash
 cd ~/STS-45
 export PATH="$HOME/.local/bin:$PATH"
-llama-server serve -m models/LFM2.5-230M-Q4_K_M.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 2048
+llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 2048
 ```
 
-> **Why `--no-kv-offload`?** The LFM 2.5 architecture needs this flag on CPU-only setups to avoid a segfault during model loading. If you're on a GPU machine, you can drop it (and add `-ngl 99`).
+> **Why `--no-kv-offload`?** Some architectures needs this flag on CPU-only setups to avoid a segfault during model loading. If you're on a GPU machine, you can drop it (and add `-ngl 99`).
 
 > **First load is slow**: The model takes 1–3 seconds to load on the first request. Subsequent requests are instant.
 
@@ -167,7 +167,7 @@ See `realtime.py` for the full protocol specification.
 | System packages | `apt install nginx curl wget libgomp1 python3-pip python3-venv` | — |
 | Python venv | Creates `.venv/`, installs `piper-tts flask numpy requests websockets` | — |
 | llama.cpp | Runs `curl -LsSf https://llama.app/install.sh \| sh` | ~16 MB binary |
-| LLM model | Downloads `LFM2.5-230M-Q4_K_M.gguf` to `models/` | ~150 MB |
+| LLM model | Downloads `gemma-4-E2B-UD-Q2.gguf` to `models/` | ~2.1 GB |
 | parakeet binary | Downloads `parakeet-server` v0.4.0 to `bin/` | ~2.7 MB |
 | STT model | Downloads `tdt_ctc-110m-f16.gguf` to `models/` | ~260 MB |
 | Nginx config | Copies `docker/nginx/default.conf` → `/etc/nginx/sites-available/sts45`, enables it, restarts nginx | — |
@@ -197,7 +197,7 @@ Press `Ctrl+C` to stop everything gracefully.
 ```bash
 # Terminal 1: LLM
 export PATH="$HOME/.local/bin:$PATH"
-llama-server serve -m models/LFM2.5-230M-Q4_K_M.gguf --host 127.0.0.1 --port 8080 --no-kv-offload
+llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload
 
 # Terminal 2: STT
 ./bin/parakeet-server --model models/tdt_ctc-110m-f16.gguf --port 8081
@@ -304,10 +304,10 @@ Click the gear icon (top-right) to open the settings drawer. All fields auto-sav
 
 ### `llama-server` segfaults
 
-The LFM 2.5 model requires `--no-kv-offload` on CPU-only systems. The `start.sh` script already includes this flag. If starting manually:
+Some models requires `--no-kv-offload` on CPU-only systems. The `start.sh` script already includes this flag. If starting manually:
 
 ```bash
-llama-server serve -m models/LFM2.5-230M-Q4_K_M.gguf --host 127.0.0.1 --port 8080 --no-kv-offload
+llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload
 ```
 
 ### Nginx returns 502 Bad Gateway
@@ -373,7 +373,7 @@ curl http://127.0.0.1:8080/v1/models
 
 # If not, start it:
 export PATH="$HOME/.local/bin:$PATH"
-llama-server serve -m models/LFM2.5-230M-Q4_K_M.gguf --host 127.0.0.1 --port 8080 --no-kv-offload
+llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload
 ```
 
 ### Port already in use
@@ -388,7 +388,7 @@ sudo kill <PID>
 
 ### LLM responds too slowly
 
-The LFM 2.5-230M model runs at ~70 tokens/second on a modern CPU. A typical 50-token response takes ~0.7 seconds of generation time. If it's slower:
+The Gemma 4 E2B Q2 model runs at ~10 tokens/second on CPU. A typical 50-token response takes ~5 seconds. If it's slower:
 
 - Close other CPU-intensive applications
 - Reduce `--ctx-size` (e.g., `-c 1024`)
@@ -404,11 +404,11 @@ To use a different GGUF model, edit the model path in `start.sh` or pass environ
 LLM_API=http://127.0.0.1:8080/v1/chat/completions LLM_MODEL=my-model ./start.sh
 ```
 
-To download a different quantization of LFM 2.5:
+To download a different quantization:
 
 ```bash
 cd models
-wget https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF/resolve/main/LFM2.5-230M-Q5_K_M.gguf
+wget https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q2_K_XL.gguf
 # Then update start.sh to point to this file
 ```
 
@@ -494,6 +494,6 @@ The tunnel handles TLS termination, DDoS protection, and WebSocket support autom
 | Reverse proxy | **Nginx** | `7777` |
 | Cloudflare Tunnel | **cloudflared** | tunnel → `:7777` |
 | STT | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) v0.4.0 | `8081` |
-| LLM | [llama.cpp](https://github.com/ggerganov/llama.cpp) (via [llama.app](https://llama.app)) + `LiquidAI/LFM2.5-230M-GGUF` | `8080` |
+| LLM | [llama.cpp](https://github.com/ggerganov/llama.cpp) (via [llama.app](https://llama.app)) + `unsloth/gemma-4-E2B-it-qat-GGUF` | `8080` |
 | TTS | [Piper](https://github.com/rhasspy/piper) (ONNX Runtime) | in-process |
 | UI | Flask + vanilla JS | `7778` (HTTP), `7779` (WS) |

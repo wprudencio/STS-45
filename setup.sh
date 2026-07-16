@@ -115,17 +115,18 @@ else
 fi
 
 # ─── Download LLM model ──────────────────────────────────────────────────────
-MODEL_FILE="LFM2.5-230M-Q4_K_M.gguf"
-HF_REPO="LiquidAI/LFM2.5-230M-GGUF"
+MODEL_FILE="gemma-4-E2B-UD-Q2.gguf"
+HF_REPO="unsloth/gemma-4-E2B-it-qat-GGUF"
 MODEL_PATH="models/$MODEL_FILE"
 
 if [[ ! -f "$MODEL_PATH" ]]; then
-    info "Downloading $MODEL_FILE from $HF_REPO (≈150 MB)..."
-    cd models
-    wget -q --show-progress "https://huggingface.co/$HF_REPO/resolve/main/$MODEL_FILE" || {
+    info "Downloading $MODEL_FILE from $HF_REPO (≈2.1 GB)..."
+    cd /tmp
+    wget -q --show-progress "https://huggingface.co/$HF_REPO/resolve/main/$MODEL_FILE" -O "$MODEL_FILE" || {
         err "Failed to download model. Check the URL or try manually."
         exit 1
     }
+    mv "$MODEL_FILE" "$SCRIPT_DIR/models/"
     cd "$SCRIPT_DIR"
     ok "LLM model downloaded"
 else
@@ -224,13 +225,13 @@ echo "  parakeet-server (STT)→  http://localhost:8081"
 echo "  cloudflared (tunnel) →  $(command -v cloudflared &>/dev/null && echo '✅ installed' || echo '❌ missing')"
 echo ""
 echo "Models:"
-echo "  LLM:  models/LFM2.5-230M-Q4_K_M.gguf"
+echo "  LLM:  models/gemma-4-E2B-UD-Q2.gguf"
 echo "  STT:  models/tdt_ctc-110m-f16.gguf"
 echo "  TTS:  models/piper/ (auto-downloaded on first use)"
 echo ""
 echo "Before starting, make sure llama-server is running:"
-echo "  llama-server serve -m models/LFM2.5-230M-Q4_K_M.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 2048"
-echo "  (or: ~/.llama-app/llama serve -m models/LFM2.5-230M-Q4_K_M.gguf --host 127.0.0.1 --port 8080 --no-kv-offload)"
+echo "  llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 2048"
+echo "  (or: ~/.llama-app/llama serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload)"
 echo ""
 echo "Then run:  ./start.sh"
 echo ""
