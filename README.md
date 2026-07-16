@@ -416,11 +416,83 @@ Available quantizations: `Q4_0`, `Q4_K_M`, `Q5_K_M`, `Q6_K`, `Q8_0`, `F16`, `BF1
 
 ---
 
+## Cloudflare Tunnel (public URL)
+
+Expose your local STS-45 to the internet via **Cloudflare Tunnel** so you — or anyone you share the link with — can use it from anywhere. No static IP, no port forwarding, no DNS config needed.
+
+### Quick tunnel (random URL, no account required)
+
+```bash
+./start.sh --cf
+```
+
+This starts a `cloudflared` tunnel that creates a random `*.trycloudflare.com` URL (e.g., `https://random-string.trycloudflare.com`). The URL appears in the terminal output once the tunnel is ready (~5 seconds).
+
+Or with an environment variable:
+
+```bash
+CLOUDFLARE=1 ./start.sh
+```
+
+### Persistent tunnel (your own domain, requires a Cloudflare account)
+
+1. **Log in** (one-time):
+   ```bash
+   cloudflared tunnel login
+   ```
+
+2. **Create a tunnel** (one-time):
+   ```bash
+   cloudflared tunnel create sts45
+   ```
+   This creates a credentials file and a tunnel ID.
+
+3. **Create the config file** at `~/.cloudflared/sts45.yml`:
+   ```yaml
+   tunnel: <tunnel-id-from-step-2>
+   credentials-file: /home/$USER/.cloudflared/<tunnel-id>.json
+   
+   ingress:
+     - hostname: voice.yourdomain.com
+       service: http://localhost:7777
+     - service: http_status:404
+   ```
+
+4. **Route DNS** (replace `voice.yourdomain.com` with your domain):
+   ```bash
+   cloudflared tunnel route dns sts45 voice.yourdomain.com
+   ```
+
+5. **Run with your domain**:
+   ```bash
+   ./start.sh --cf voice.yourdomain.com
+   ```
+
+Now open `https://voice.yourdomain.com` anywhere.
+
+### How it works
+
+```
+User's browser ──► Cloudflare Edge ──► cloudflared tunnel ──► localhost:7777
+                        (TLS)              (persistent)         (nginx)
+```
+
+The tunnel handles TLS termination, DDoS protection, and WebSocket support automatically. The WebSocket connection for realtime audio works seamlessly through the tunnel.
+
+### Notes
+
+- The quick tunnel URL changes every restart. Use a persistent tunnel for a fixed URL.
+- WebSocket connections (`wss://`) work automatically through Cloudflare — no extra config needed.
+- The tunnel adds ~50-100 ms of latency, which is fine for voice conversations.
+
+---
+
 ## Stack
 
 | Role | Tech | Port |
 |------|------|------|
 | Reverse proxy | **Nginx** | `7777` |
+| Cloudflare Tunnel | **cloudflared** | tunnel → `:7777` |
 | STT | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) v0.4.0 | `8081` |
 | LLM | [llama.cpp](https://github.com/ggerganov/llama.cpp) (via [llama.app](https://llama.app)) + `LiquidAI/LFM2.5-230M-GGUF` | `8080` |
 | TTS | [Piper](https://github.com/rhasspy/piper) (ONNX Runtime) | in-process |
