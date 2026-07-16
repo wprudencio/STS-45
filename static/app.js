@@ -204,29 +204,47 @@ function onRTMsg(m) {
   }
 }
 
+function connectRealtimeWS() {
+  // Build the WS URL
+  const pagePort = String(location.port || (location.protocol === 'https:' ? '443' : '80'));
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsHost = (!location.hostname || location.hostname === '0.0.0.0') ? '127.0.0.1' : location.hostname;
+  const samePort = pagePort === String(RT_WS_PORT);
+  const url = (samePort || location.protocol === 'https:')
+    ? wsProto + '//' + location.host + '/ws'
+    : wsProto + '//' + wsHost + ':' + RT_WS_PORT + '/ws';
+
+  try { rtWS = new WebSocket(url); }
+  catch (e) { showToast('WS error: ' + e.message, 'error'); stopRealtimeUI(''); return; }
+  rtWS.binaryType = 'arraybuffer';
+  rtWS.onopen = () => { rtReconnectAttempts = 0; rtSendStart(); };
+  rtWS.onmessage = (e) => { if (e.data instanceof ArrayBuffer) onRTAudio(e.data); else { try { onRTMsg(JSON.parse(e.data)); } catch (_) { } } };
+  rtWS.onclose = () => {
+    if (!rtRunning) return;
+    if (rtReconnectAttempts < rtReconnectMax) {
+      rtReconnectAttempts++;
+      const delay = rtReconnectDelay * Math.pow(2, rtReconnectAttempts - 1);
+      console.log(`WS closed — reconnecting in ${delay}ms (attempt ${rtReconnectAttempts}/${rtReconnectMax})`);
+      setRTState('connecting');
+      setTimeout(() => connectRealtimeWS(), delay);
+    } else {
+      showToast('Realtime disconnected after ' + rtReconnectMax + ' retries', 'error');
+      stopRealtimeUI('');
+    }
+  };
+  rtWS.onerror = () => { /* ignore — onclose handles reconnection */ };
+}
+
 async function startRealtime() {
   if (rtRunning) return;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     showToast('Microphone unavailable (needs HTTPS or localhost)', 'error'); return;
   }
   setRTState('connecting');
-  // Same port? Use relative URL (Docker/nginx single-port). Otherwise explicit WS port (local dev).
-  const pagePort = String(location.port || (location.protocol === 'https:' ? '443' : '80'));
-  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsHost = (!location.hostname || location.hostname === '0.0.0.0') ? '127.0.0.1' : location.hostname;
-  // same-port (Docker/nginx single-port) or HTTPS behind a proxy (e.g. Cloud Shell):
-  // the WS is reachable at the same host without an explicit secondary port.
-  const samePort = pagePort === String(RT_WS_PORT);
-  const url = (samePort || location.protocol === 'https:')
-    ? wsProto + '//' + location.host + '/ws'
-    : wsProto + '//' + wsHost + ':' + RT_WS_PORT + '/ws';
-  try { rtWS = new WebSocket(url); }
-  catch (e) { showToast('WS error: ' + e.message, 'error'); stopRealtimeUI(''); return; }
-  rtWS.binaryType = 'arraybuffer';
-  rtWS.onopen = () => { rtSendStart(); };
-  rtWS.onmessage = (e) => { if (e.data instanceof ArrayBuffer) onRTAudio(e.data); else { try { onRTMsg(JSON.parse(e.data)); } catch (_) { } } };
-  rtWS.onclose = () => { if (rtRunning) { showToast('Realtime disconnected', 'error'); stopRealtimeUI(''); } };
-  rtWS.onerror = () => { showToast('Realtime connection error', 'error'); };
+  // Reset reconnection state for a fresh session
+  rtReconnectAttempts = 0;
+  rtReconnectMax = 10;
+  rtReconnectDelay = 500;
   try { rtMicStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
   catch (e) { showToast('Mic error: ' + e.message, 'error'); stopRealtimeUI(''); return; }
   rtCtx = new AudioContext({ sampleRate: 16000 });
@@ -254,6 +272,7 @@ async function startRealtime() {
   rtRunning = true;
   setRTState(rtState); // refresh end button + classes
   rtWaveStart();
+  connectRealtimeWS(); // establish WebSocket connection (with auto-reconnect)
 }
 
 function stopRealtimeUI(msg) {
