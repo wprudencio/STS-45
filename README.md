@@ -56,7 +56,7 @@ In a **separate terminal** (or tmux pane), run:
 ```bash
 cd ~/STS-45
 export PATH="$HOME/.local/bin:$PATH"
-llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 2048
+llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 1024 -b 512 --cache-type-k q4_0 --cache-type-v q4_0 --reasoning off
 ```
 
 > **Why `--no-kv-offload`?** Some architectures needs this flag on CPU-only setups to avoid a segfault during model loading. If you're on a GPU machine, you can drop it (and add `-ngl 99`).
@@ -197,7 +197,7 @@ Press `Ctrl+C` to stop everything gracefully.
 ```bash
 # Terminal 1: LLM
 export PATH="$HOME/.local/bin:$PATH"
-llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload
+llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 1024 -b 512 --cache-type-k q4_0 --cache-type-v q4_0 --reasoning off
 
 # Terminal 2: STT
 ./bin/parakeet-server --model models/tdt_ctc-110m-f16.gguf --port 8081
@@ -307,7 +307,7 @@ Click the gear icon (top-right) to open the settings drawer. All fields auto-sav
 Some models requires `--no-kv-offload` on CPU-only systems. The `start.sh` script already includes this flag. If starting manually:
 
 ```bash
-llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload
+llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 1024 -b 512 --cache-type-k q4_0 --cache-type-v q4_0 --reasoning off
 ```
 
 ### Nginx returns 502 Bad Gateway
@@ -373,7 +373,7 @@ curl http://127.0.0.1:8080/v1/models
 
 # If not, start it:
 export PATH="$HOME/.local/bin:$PATH"
-llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload
+llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 1024 -b 512 --cache-type-k q4_0 --cache-type-v q4_0 --reasoning off
 ```
 
 ### Port already in use
@@ -388,7 +388,7 @@ sudo kill <PID>
 
 ### LLM responds too slowly
 
-The Gemma 4 E2B Q2 model runs at ~10 tokens/second on CPU. A typical 50-token response takes ~5 seconds. If it's slower:
+The Gemma 4 E2B Q2 model runs at ~10.5 t/s on CPU with optimized flags. Time-to-first-token ~600ms (short) / ~1.7s (with history). If it's slower:
 
 - Close other CPU-intensive applications
 - Reduce `--ctx-size` (e.g., `-c 1024`)
