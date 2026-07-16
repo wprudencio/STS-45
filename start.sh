@@ -127,7 +127,7 @@ if ! curl -s --max-time 2 http://127.0.0.1:8080/v1/models >/dev/null 2>&1; then
         if [[ -f "$LLM_MODEL_PATH" ]]; then
             echo "🚀 Starting llama-server from $LLAMA_BIN on :8080..."
             # New llama.app uses subcommands: 'llama-server serve' or 'llama serve'
-            LLAMA_ARGS="-m \"$LLM_MODEL_PATH\" --host 127.0.0.1 --port 8080 --no-kv-offload -c 2048"
+            LLAMA_ARGS="-m \"$LLM_MODEL_PATH\" --host 127.0.0.1 --port 8080 --no-kv-offload -c 1024 --reasoning off"
             if echo "$LLAMA_BIN" | grep -q "llama$" || [[ "$(basename "$LLAMA_BIN")" == "llama" ]]; then
                 eval "\"$LLAMA_BIN\" serve $LLAMA_ARGS &"
             else
@@ -151,7 +151,7 @@ if ! curl -s --max-time 2 http://127.0.0.1:8080/v1/models >/dev/null 2>&1; then
     else
         echo "⚠️  llama-server not found in PATH."
         echo "   Install: curl -LsSf https://llama.app/install.sh | sh"
-        echo "   Or start manually: llama-server -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080"
+        echo "   Or start manually: llama-server -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --reasoning off"
     fi
 else
     echo "✅ llama-server already running on :8080"

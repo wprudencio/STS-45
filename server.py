@@ -33,7 +33,8 @@ SYS_PROMPT = (
     "You are a friendly, helpful assistant. Respond in the same language as the user. "
     "Keep answers concise and natural for text-to-speech. "
     "Avoid markdown, lists, URLs, or special formatting. "
-    "Use short to medium sentences. Avoid asterisks and emojis."
+    "Use short to medium sentences. Avoid asterisks and emojis. "
+    "Do NOT show your thinking or reasoning process. Answer directly."
 )
 
 app = Flask(__name__)

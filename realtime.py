@@ -551,7 +551,7 @@ def transcribe_wav(wav_bytes, filename, lang, stt_api_url):
 def stream_llm(history, cfg):
     """Stream an OpenAI-style chat completion from llama.cpp.
 
-    Yields (kind, token) tuples where kind is 'text' or 'reasoning'.
+    Yields (kind, token) tuples where kind is 'text'.
     """
     api_url = (cfg.get("api_url") or "").strip()
     if not api_url:
@@ -606,8 +606,7 @@ def stream_llm(history, cfg):
             content = delta.get("content")
             if reasoning and not has_content:
                 has_reasoning = True
-                yield ("reasoning", reasoning)
-            elif content:
+            if content:
                 has_content = True
                 char_count += len(content)
                 yield ("text", content)
