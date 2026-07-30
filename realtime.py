@@ -5,7 +5,7 @@ A small asyncio WebSocket server (run in a daemon thread alongside the Flask
 app) that mirrors the Hugging Face "hf-realtime-voice" speech-to-speech loop,
 but fully local:
 
-    you speak -> VAD -> parakeet STT -> llama.cpp LLM -> Piper TTS -> orb replies
+    you speak -> VAD -> parakeet STT -> llama.cpp LLM -> Inflect-Nano-v2 TTS -> orb replies
 
 The browser streams 16 kHz PCM16 mono over the socket; the server runs an
 energy VAD to find utterance boundaries, transcribes each utterance, streams
@@ -627,30 +627,15 @@ def stream_llm(history, cfg):
 
 
 def synth_to_pcm16(app, cfg, text):
-    """Synthesize `text` with Piper TTS; return int16 PCM numpy array."""
-    voice_map = getattr(app, "tts", None)
-    if not voice_map:
-        print(f"[{_now_ts()}] TTS SKIP: no voice map loaded yet", flush=True)
+    """Synthesize `text` with Inflect-Nano-v2 TTS; return int16 PCM numpy array."""
+    inflect = getattr(app, "tts", None)
+    if inflect is None:
+        print(f"[{_now_ts()}] TTS SKIP: Inflect-Nano-v2 not loaded yet", flush=True)
         return None
     try:
-        from pathlib import Path
-        from piper import PiperVoice
-
-        voice_name = cfg.get("voice", "en_US-lessac-medium")
-        with app.tts_lock:
-            if voice_name not in voice_map:
-                onnx_path = app._download_voice(voice_name)
-                if onnx_path is None:
-                    return None
-                voice = PiperVoice.load(str(onnx_path))
-                import json
-                cfg_json = json.loads(Path(str(onnx_path) + ".json").read_text())
-                sr = cfg_json.get("audio", {}).get("sample_rate", 22050)
-                voice_map[voice_name] = (voice, sr)
-            voice, sr = voice_map[voice_name]
-        gen = voice.synthesize(text)
-        pcm = b"".join(chunk.audio_int16_bytes for chunk in gen)
-        arr = np.frombuffer(pcm, dtype=np.int16)
+        sr, waveform = inflect.synthesize(text, speed=1.0, variation=0.667, seed=0)
+        # waveform is float32 [-1.0, 1.0] — convert to int16
+        arr = (np.clip(waveform, -1.0, 1.0) * 32767.0).astype(np.int16)
         print(f"[{_now_ts()}] TTS synth OK: {len(text)} chars → {len(arr)} samples ({len(arr)/sr:.2f}s @ {sr}Hz)", flush=True)
         return arr
     except Exception as e:
@@ -680,7 +665,7 @@ async def _handler(ws):
             if t == "start":
                 sess.cfg = {
                     "lang": data.get("lang", _app.config.get("lang", "en")),
-                    "voice": data.get("voice", _app.config.get("voice", "en_US-lessac-medium")),
+                    "voice": data.get("voice", _app.config.get("voice", "inflect-nano-v2")),
                     "max_tokens": int(data.get("max_tokens", 512)),
                     "model": _app.config.get("model", "default"),
                     "api_url": (data.get("api_url") or "").strip() or _app.config.get("api_url", ""),
@@ -690,12 +675,12 @@ async def _handler(ws):
                 sp = (data.get("sys_prompt") or "").strip()
                 sess.history = [{"role": "system", "content": sp or _app.SYS_PROMPT}]
                 _log(sess.sid, f"start cfg: voice={sess.cfg['voice']} lang={sess.cfg['lang']} model={sess.cfg['model']}")
-                tts_dict = getattr(_app, "tts", None)
-                if not tts_dict:
+                inflect_tts = getattr(_app, "tts", None)
+                if not inflect_tts:
                     _log(sess.sid, "start rejected: TTS model not loaded")
                     sess.send_json({"type": "error", "text": "TTS model still loading — retrying…"})
                     continue
-                sess.tts_sr = 22050  # Piper sample rate
+                sess.tts_sr = 24000  # Inflect-Nano-v2 sample rate
                 sess.cancel = False
                 sess.set_state("listening")
                 await ws.send(json.dumps({"type": "ready", "sampleRate": sess.tts_sr}))

@@ -3,8 +3,9 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# onnxruntime (used by piper-tts) needs libgomp
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+# Inflect-Nano-v2 uses phonemizer which needs espeak-ng
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    espeak-ng libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -18,8 +19,8 @@ COPY server.py realtime.py ./
 COPY static/ ./static/
 COPY templates/ ./templates/
 
-# Piper voice models live here; mount as a volume to persist downloads
-RUN mkdir -p /app/models/piper
+# Inflect-Nano-v2 model lives here; auto-downloaded on first start
+RUN mkdir -p /app/models/inflect-nano-v2
 
 # Ports are internal-only; nginx is the single external entry point (7777)
 EXPOSE 7777 7778

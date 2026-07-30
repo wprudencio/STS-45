@@ -19,7 +19,7 @@ services:
       context: .
       dockerfile: docker/app/Dockerfile
     volumes:
-      - piper-voices:/app/models/piper
+      - inflect-model:/app/models/inflect-nano-v2
     environment:
       LLM_API: "http://llama-server:8080/v1/chat/completions"
       STT_API: "http://parakeet-stt:8081"
@@ -41,4 +41,4 @@ services:
 volumes:
   llama-models:
   stt-models:
-  piper-voices:
+  inflect-model:

@@ -3,7 +3,7 @@
 Hands-free speech-to-speech voice assistant. Tap the orb, talk, it replies — everything runs on your machine, **no Docker required**.
 
 ```
-Browser mic ──16kHz PCM──► Nginx :7777 ──► WS :7779 ──► VAD → parakeet STT → llama.cpp LLM → Piper TTS
+Browser mic ──16kHz PCM──► Nginx :7777 ──► WS :7779 ──► VAD → parakeet STT → llama.cpp LLM → Inflect-Nano-v2 TTS
                           (single URL)                                                      ↓ per clause
 Browser speaker ◄──PCM──────────────────────────────────────────────────────────────────────┘
 ```
@@ -17,7 +17,7 @@ One script sets up everything: installs nginx, downloads models, creates the Pyt
 ### Prerequisites
 
 - **Ubuntu 24.04** (or Debian-based Linux). Other distros work but may need adapted package names.
-- **Python 3.12+** (`python3 --version` to check). Piper TTS works on Python ≥ 3.9.
+- **Python 3.12+** (`python3 --version` to check). Inflect-Nano-v2 works on Python ≥ 3.10.
 - **~1 GB free disk space** for models (~2.1 GB LLM, ~260 MB STT, ~2.1 GB parakeet binary).
 - **sudo access** (for installing nginx).
 - **Headphones recommended** to avoid speaker → mic echo.
@@ -40,7 +40,7 @@ chmod +x setup.sh
 The script will:
 
 1. Install system packages: `nginx`, `curl`, `wget`, `libgomp1`, `python3-pip`, `python3-venv`
-2. Create a Python virtual environment (`.venv/`) and install `piper-tts`, `flask`, `websockets`, etc.
+2. Create a Python virtual environment (`.venv/`) and install `torch`, `huggingface-hub`, `flask`, `websockets`, etc.
 3. Download **llama.cpp** via the official [llama.app](https://llama.app) installer
 4. Download the **LLM model** (`unsloth/gemma-4-E2B-it-qat-GGUF`, ~2.1 GB)
 5. Download the **parakeet-server** binary (v0.4.0, ~2.7 MB) into `bin/`
@@ -77,7 +77,7 @@ This script will:
 1. Start **parakeet-server** (STT) on port `8081`
 2. Detect that `llama-server` is already running on `8080` and skip it
 3. Verify nginx is running on port `7777`
-4. Start the **Flask + WebSocket** server on ports `7778` (HTTP) and `7779` (WS)
+4. Start the **Flask + WebSocket** server on ports `7778` (HTTP) and `7779` (WS) with Inflect-Nano-v2 TTS
 
 ### 5. Open the orb
 
@@ -88,7 +88,7 @@ You'll see the amber CRT-style orb interface. Tap the orb, grant microphone acce
 1. Listen until you pause (~650 ms of silence)
 2. Transcribe your speech via parakeet STT
 3. Generate a reply via the LLM
-4. Speak it back via Piper TTS (streaming, sentence by sentence)
+4. Speak it back via Inflect-Nano-v2 TTS (streaming, sentence by sentence)
 
 ### 6. Stop everything
 
@@ -165,7 +165,7 @@ See `realtime.py` for the full protocol specification.
 | Step | What it does | Downloads |
 |------|-------------|-----------|
 | System packages | `apt install nginx curl wget libgomp1 python3-pip python3-venv` | — |
-| Python venv | Creates `.venv/`, installs `piper-tts flask numpy requests websockets` | — |
+| Python venv | Creates `.venv/`, installs `torch flask numpy requests websockets` etc. | — |
 | llama.cpp | Runs `curl -LsSf https://llama.app/install.sh \| sh` | ~16 MB binary |
 | LLM model | Downloads `gemma-4-E2B-UD-Q2.gguf` to `models/` | ~2.1 GB |
 | parakeet binary | Downloads `parakeet-server` v0.4.0 to `bin/` | ~2.7 MB |
@@ -225,7 +225,7 @@ This starts the Flask server on port `7777` and the WebSocket server on port `77
 ## Files and directories
 
 ```
-├── server.py              Flask web server + background Piper TTS loader
+├── server.py              Flask web server + background Inflect-Nano-v2 TTS loader
 ├── realtime.py            WebSocket pipeline (VAD → STT → LLM → TTS)
 ├── setup.sh               One-time installation (nginx, models, venv)
 ├── start.sh               Start all services (parakeet → llama → Flask/WS → nginx)
@@ -244,7 +244,7 @@ This starts the Flask server on port `7777` and the WebSocket server on port `77
 │       └── default.conf   Nginx config (proxies :7777 → :7778 + :7779)
 │
 ├── bin/                   parakeet-server binary (created by setup.sh, gitignored)
-├── models/                LLM, STT, Piper voice models (created by setup.sh, gitignored)
+├── models/                LLM, STT, Inflect-Nano-v2 model (created by setup.sh, gitignored)
 └── .venv/                 Python virtual environment (created by setup.sh, gitignored)
 ```
 
@@ -257,7 +257,7 @@ If you prefer Docker, the traditional method still works:
 ```bash
 git clone git@github.com:wprudencio/STS-45.git
 cd STS-45
-git checkout piper-tts
+git checkout local-setup
 docker compose up
 ```
 
@@ -267,27 +267,10 @@ See the original README sections below for Docker-specific details.
 
 ---
 
-## Voices
+## Voice
 
-15 Piper voices across 8 languages. Select from the Settings drawer (gear icon, top-right):
-
-| Voice | Language | Gender |
-|-------|----------|--------|
-| `en_US-lessac-medium` | English (US) | Female |
-| `en_US-amy-low` | English (US) | Female |
-| `en_US-libritts-high` | English (US) | Female |
-| `en_US-ryan-high` | English (US) | Male |
-| `en_US-joe-medium` | English (US) | Male |
-| `en_US-kusal-medium` | English (US) | Male |
-| `en_GB-alan-medium` | English (UK) | Male |
-| `en_GB-semaine-medium` | English (UK) | Female |
-| `pt_BR-faber-medium` | Portuguese (BR) | Male |
-| `es_ES-carlfm-x_low` | Spanish (ES) | Male |
-| `fr_FR-siwis-medium` | French (FR) | Female |
-| `de_DE-thorsten-medium` | German (DE) | Male |
-| `it_IT-paola-medium` | Italian (IT) | Female |
-
-New voices auto-download from HuggingFace on first use and are cached in `models/piper/`.
+Inflect-Nano-v2 — a compact 4M-parameter neural TTS model (English, male voice, 24 kHz).
+The model is auto-downloaded from HuggingFace on first start and cached in `models/inflect-nano-v2/`.
 
 ## Settings
 
@@ -295,7 +278,7 @@ Click the gear icon (top-right) to open the settings drawer. All fields auto-sav
 
 | Setting | Description |
 |---------|-------------|
-| **Voice** | Piper voice (determines spoken language) |
+| **Voice** | Inflect-Nano-v2 (English male voice) |
 | **Language** | Used by parakeet STT for transcription |
 | **Max tokens** | Maximum LLM response length |
 | **System prompt** | Custom instructions for the assistant |
@@ -330,7 +313,7 @@ This usually means the TTS model hasn't finished loading. Wait a few seconds aft
 curl http://localhost:7777/api/health   # should show "tts_ready": true
 ```
 
-### "No module named piper"
+### "No module named torch"
 
 The Python virtual environment isn't activated or wasn't created:
 
@@ -495,5 +478,5 @@ The tunnel handles TLS termination, DDoS protection, and WebSocket support autom
 | Cloudflare Tunnel | **cloudflared** | tunnel → `:7777` |
 | STT | [parakeet.cpp](https://github.com/mudler/parakeet.cpp) v0.4.0 | `8081` |
 | LLM | [llama.cpp](https://github.com/ggerganov/llama.cpp) (via [llama.app](https://llama.app)) + `unsloth/gemma-4-E2B-it-qat-GGUF` | `8080` |
-| TTS | [Piper](https://github.com/rhasspy/piper) (ONNX Runtime) | in-process |
+| TTS | [Inflect-Nano-v2](https://huggingface.co/owensong/Inflect-Nano-v2) (PyTorch) | in-process |
 | UI | Flask + vanilla JS | `7778` (HTTP), `7779` (WS) |

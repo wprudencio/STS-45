@@ -167,7 +167,7 @@ fi
 echo ""
 echo "╔═══════════════════════════════════════════════════════╗"
 echo "║                                                       ║"
-echo "║   🚀 Starting STS-45 (Piper TTS)...                   ║"
+echo "║   🚀 Starting STS-45 (Inflect-Nano-v2)...              ║"
 echo "║                                                       ║"
 echo "║   Open:  http://localhost:7777                        ║"
 echo "║                                                       ║"

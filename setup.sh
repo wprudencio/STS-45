@@ -97,7 +97,7 @@ pip install --quiet -r requirements.txt
 ok "Python dependencies installed"
 
 # ─── Create directories ──────────────────────────────────────────────────────
-mkdir -p bin models models/piper
+mkdir -p bin models models/inflect-nano-v2
 
 # ─── Install llama.cpp server ───────────────────────────────────────────────
 if ! command -v llama-server &>/dev/null; then
@@ -227,7 +227,7 @@ echo ""
 echo "Models:"
 echo "  LLM:  models/gemma-4-E2B-UD-Q2.gguf"
 echo "  STT:  models/tdt_ctc-110m-f16.gguf"
-echo "  TTS:  models/piper/ (auto-downloaded on first use)"
+echo "  TTS:  models/inflect-nano-v2/ (auto-downloaded on first use)"
 echo ""
 echo "Before starting, make sure llama-server is running:"
 echo "  llama-server serve -m models/gemma-4-E2B-UD-Q2.gguf --host 127.0.0.1 --port 8080 --no-kv-offload -c 1024 -b 512 --cache-type-k q4_0 --cache-type-v q4_0 --reasoning off"

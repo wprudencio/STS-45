@@ -5,7 +5,7 @@ const RT_WS_PORT = BOOT.ws_port;
 // ---------- Settings ----------
 function loadSettings() {
   const g = (k, d) => localStorage.getItem(k) || d;
-  document.getElementById('voice').value = g('sts45_voice', 'en_US-lessac-medium');
+  document.getElementById('voice').value = g('sts45_voice', 'inflect-nano-v2');
   document.getElementById('lang').value = g('sts45_lang', 'en');
   const maxTokens = parseInt(g('sts45_max_tokens', '512'), 10);
   document.getElementById('maxTokens').value = maxTokens;
