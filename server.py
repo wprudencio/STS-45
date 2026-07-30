@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-STS-45 — VAD → parakeet STT → llama.cpp LLM → Piper TTS → speaker.
+STS-45 — VAD → parakeet STT → llama.cpp LLM → Inflect-Nano-v2 TTS → speaker.
 
     Browser mic ──16kHz PCM──► ws :PORT ──► VAD -> STT -> LLM -> TTS
     Browser speaker ◄──PCM────────────────────────────────────────┘
@@ -18,7 +18,6 @@ from pathlib import Path
 
 import requests
 from flask import Flask, render_template, request
-from piper import PiperVoice
 
 try:
     import realtime as _realtime
@@ -33,19 +32,20 @@ SYS_PROMPT = (
     "You are a friendly, helpful assistant. Respond in the same language as the user. "
     "Keep answers concise and natural for text-to-speech. "
     "Avoid markdown, lists, URLs, or special formatting. "
-    "Use short to medium sentences. Avoid asterisks and emojis."
+    "Use short to medium sentences. Avoid asterisks and emojis. "
+    "Do NOT show your thinking or reasoning process. Answer directly."
 )
 
 app = Flask(__name__)
 
-tts = {}
+# Inflect-Nano-v2 TTS engine (loaded in background)
+tts = None  # InflectTTS instance
 tts_lock = threading.Lock()
-VOICE_DIR = Path("models/piper")
-VOICE_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_DIR = Path("models/inflect-nano-v2")
 
 config = {
     "lang": "en",
-    "voice": "en_US-lessac-medium",
+    "voice": "inflect-nano-v2",
     "api_url": LLAMA_API,
     "stt_api_url": STT_API,
     "model": "default",
@@ -72,35 +72,24 @@ def _on_signal(signum, _frame):
     raise SystemExit(0)
 
 
-def _voice_url(voice_name):
-    """Construct huggingface download URL from voice name like en_US-lessac-medium."""
-    parts = voice_name.split("-")
-    if len(parts) < 3:
-        return None
-    region = parts[0]  # en_US
-    lang = region.split("_")[0]  # en
-    speaker = parts[1]  # lessac
-    quality = "-".join(parts[2:])  # medium or low or high
-    base = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
-    return f"{base}/{lang}/{region}/{speaker}/{quality}/{voice_name}"
-
-
-def _download_voice(voice_name):
-    onnx_path = VOICE_DIR / f"{voice_name}.onnx"
-    json_path = VOICE_DIR / f"{voice_name}.onnx.json"
-    if onnx_path.exists() and json_path.exists():
-        return onnx_path
-    url = _voice_url(voice_name)
-    if url is None:
-        return None
-    print(f"  Downloading {voice_name}...")
-    for ext, path in [(".onnx", onnx_path), (".onnx.json", json_path)]:
-        if not path.exists():
-            r = requests.get(f"{url}{ext}", timeout=300)
-            r.raise_for_status()
-            path.write_bytes(r.content)
-    print(f"  {voice_name} ready")
-    return onnx_path
+def _download_model():
+    """Download Inflect-Nano-v2 model from HuggingFace via snapshot_download."""
+    from huggingface_hub import snapshot_download
+    marker = MODEL_DIR / "model.pth"
+    if marker.exists():
+        print(f"  Inflect-Nano-v2 model already at {MODEL_DIR}")
+        return True
+    print("  Downloading Inflect-Nano-v2 from HuggingFace (~16 MB)...")
+    snapshot_download(
+        "owensong/Inflect-Nano-v2",
+        local_dir=str(MODEL_DIR),
+        ignore_patterns=[
+            "evaluation/*", "samples/*", "assets/*", "docs/*",
+            "onnx/*", "*.md", "*.cff", "release_manifest.json",
+        ],
+    )
+    print(f"  Inflect-Nano-v2 ready at {MODEL_DIR}")
+    return True
 
 
 @app.route("/")
@@ -123,7 +112,7 @@ def api_settings():
 @app.route("/api/health")
 def api_health():
     return {
-        "tts_ready": bool(tts),
+        "tts_ready": tts is not None,
         "realtime": _realtime is not None,
         "config": config,
     }
@@ -132,26 +121,28 @@ def api_health():
 def _load_tts_background():
     global tts
     try:
-        default_voice = config["voice"]
-        path = _download_voice(default_voice)
-        voice = PiperVoice.load(str(path))
-        tts[default_voice] = (voice, 22050)
-        print(f"  Piper TTS loaded ({default_voice})")
+        _download_model()
+        # Add model dir + runtime to path for imports
+        sys.path.insert(0, str(MODEL_DIR))
+        sys.path.insert(0, str(MODEL_DIR / "runtime"))
+        from inference import InflectTTS
+        tts = InflectTTS(MODEL_DIR, device="cpu")
+        print(f"  Inflect-Nano-v2 TTS loaded ({tts.deployed_parameters:,} params, {tts.sample_rate} Hz)")
     except Exception as e:
-        print(f"  Piper loading failed (will retry on first use): {e}")
+        print(f"  Inflect-Nano-v2 loading failed (will retry on first use): {e}")
 
 
 def main():
     global config, RT_WS_PORT
 
-    parser = argparse.ArgumentParser(description="STS-45 (Piper TTS)")
+    parser = argparse.ArgumentParser(description="STS-45 (Inflect-Nano-v2 TTS)")
     parser.add_argument("--host", default="0.0.0.0", help="Host (0.0.0.0 for LAN access)")
     parser.add_argument("--port", type=int, default=7777, help="HTTP port")
     parser.add_argument("--ws-port", type=int, default=0, help="WS port (default: HTTP port + 1)")
     parser.add_argument("--api", default=os.environ.get("LLM_API", LLAMA_API), help="LLM API URL")
     parser.add_argument("--stt-api", default=os.environ.get("STT_API", STT_API), help="Parakeet STT server URL")
     parser.add_argument("--model", default="default", help="Model name")
-    parser.add_argument("--voice", default="en_US-lessac-medium", help="Piper voice")
+    parser.add_argument("--voice", default="inflect-nano-v2", help="TTS voice")
     parser.add_argument("--lang", default="en", help="Language")
     args = parser.parse_args()
 
@@ -165,7 +156,7 @@ def main():
 
     RT_WS_PORT = args.ws_port or (args.port + 1)
 
-    print("🚀 Loading Piper TTS in background...")
+    print("🚀 Loading Inflect-Nano-v2 TTS in background...")
     threading.Thread(target=_load_tts_background, daemon=True).start()
 
     if _realtime is not None:
@@ -178,7 +169,7 @@ def main():
 
     print(f"""
 ╔════════════════════════════════════════╗
-║   🎤 STS-45 (Piper TTS)                  ║
+║   🎤 STS-45 (Inflect-Nano-v2)              ║
 ║   Open: http://{args.host}:{args.port}          ║
 ║   WS:   ws://{args.host}:{RT_WS_PORT}/ws           ║
 ║   LLM:  {args.api}        ║

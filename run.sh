@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# =============================================================================
+# STS-45 Quick Run (legacy mode, no nginx)
+# =============================================================================
+# This runs the app WITHOUT nginx on a single machine.
+# Flask HTTP: :7777  |  WS: :7778  |  STT: :8081  |  LLM: :8080
+#
+# For the recommended setup with nginx reverse proxy (single URL on :7777),
+# use ./start.sh instead (run ./setup.sh first).
+# =============================================================================
+
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -53,7 +63,7 @@ if ! kill -0 $STT_PID 2>/dev/null; then
 fi
 
 # ---------- Realtime server (Flask + WS) ----------
-echo "🚀 Starting STS-45 (Piper TTS)..."
+echo "🚀 Starting STS-45 (Inflect-Nano-v2)..."
 echo "   Open: http://$CHAT_HOST:$CHAT_PORT  (also: http://localhost:$CHAT_PORT)"
 echo "   WS:   ws://$CHAT_HOST:$((CHAT_PORT + 1))/ws"
 echo "   STT:  http://localhost:$STT_PORT"
